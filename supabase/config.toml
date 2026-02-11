@@ -1,1 +1,7 @@
 project_id = "qwmtgamccjdbryxptpkd"
+
+[functions.parse-resume]
+verify_jwt = false
+
+[functions.match-jobs]
+verify_jwt = false
