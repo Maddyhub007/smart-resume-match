@@ -1,267 +1,224 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  User,
-  FileText,
-  Bookmark,
-  Clock,
-  MoreVertical,
-  Trash2,
-  Eye,
-  RefreshCw,
-  ArrowRight,
+  User, FileText, Bookmark, Clock, MoreVertical, Trash2, Eye, RefreshCw, ArrowRight, Loader2, PenTool,
 } from "lucide-react";
 import Layout from "../components/layout/Layout";
 import MatchScoreRing from "../components/ui/MatchScoreRing";
-
-// Mock data
-const mockResumes = [
-  {
-    id: "1",
-    filename: "Sarah_Johnson_Resume_2024.pdf",
-    uploadedAt: "2024-01-15",
-    matchScore: 78,
-    jobsMatched: 24,
-  },
-  {
-    id: "2",
-    filename: "Sarah_Johnson_Resume_Frontend.pdf",
-    uploadedAt: "2024-01-10",
-    matchScore: 72,
-    jobsMatched: 18,
-  },
-];
-
-const mockSavedJobs = [
-  {
-    id: "1",
-    title: "Senior Frontend Developer",
-    company: "TechCorp Inc.",
-    matchScore: 92,
-    savedAt: "2024-01-15",
-  },
-  {
-    id: "2",
-    title: "Full Stack Engineer",
-    company: "StartupXYZ",
-    matchScore: 87,
-    savedAt: "2024-01-14",
-  },
-  {
-    id: "3",
-    title: "React Developer",
-    company: "DigitalAgency",
-    matchScore: 85,
-    savedAt: "2024-01-13",
-  },
-];
-
-const mockHistory = [
-  {
-    id: "1",
-    action: "Resume analyzed",
-    details: "Sarah_Johnson_Resume_2024.pdf",
-    timestamp: "2024-01-15 14:30",
-  },
-  {
-    id: "2",
-    action: "Job saved",
-    details: "Senior Frontend Developer at TechCorp Inc.",
-    timestamp: "2024-01-15 14:25",
-  },
-  {
-    id: "3",
-    action: "Resume analyzed",
-    details: "Sarah_Johnson_Resume_Frontend.pdf",
-    timestamp: "2024-01-10 10:15",
-  },
-];
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 
 const Profile = () => {
-  const [activeTab, setActiveTab] = useState<"resumes" | "saved" | "history">("resumes");
+  const { user, profile, signOut } = useAuth();
+  const [activeTab, setActiveTab] = useState<"resumes" | "saved" | "applications">("resumes");
+  const [resumes, setResumes] = useState<any[]>([]);
+  const [savedJobs, setSavedJobs] = useState<any[]>([]);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user) fetchData();
+  }, [user]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const [resumeRes, savedRes, appRes] = await Promise.all([
+      supabase.from("resumes").select("*").eq("user_id", user!.id).order("created_at", { ascending: false }),
+      supabase.from("saved_jobs").select("*, jobs(*)").eq("user_id", user!.id).order("created_at", { ascending: false }),
+      supabase.from("job_applications").select("*, jobs(*)").eq("candidate_id", user!.id).order("created_at", { ascending: false }),
+    ]);
+    setResumes(resumeRes.data || []);
+    setSavedJobs(savedRes.data || []);
+    setApplications(appRes.data || []);
+    setLoading(false);
+  };
+
+  const handleDeleteResume = async (id: string) => {
+    await supabase.from("resumes").delete().eq("id", id);
+    setResumes((prev) => prev.filter((r) => r.id !== id));
+    setOpenMenu(null);
+    toast({ title: "Resume deleted" });
+  };
+
+  const handleUnsaveJob = async (savedId: string) => {
+    await supabase.from("saved_jobs").delete().eq("id", savedId);
+    setSavedJobs((prev) => prev.filter((s) => s.id !== savedId));
+  };
+
+  if (loading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
       <div className="py-12 px-4">
         <div className="container mx-auto max-w-6xl">
-          {/* Profile Header */}
           <div className="card-elevated p-6 md:p-8 mb-8">
             <div className="flex flex-col md:flex-row items-center gap-6">
               <div className="w-20 h-20 rounded-2xl gradient-primary flex items-center justify-center">
                 <User className="w-10 h-10 text-primary-foreground" />
               </div>
               <div className="flex-1 text-center md:text-left">
-                <h1 className="text-2xl font-bold text-foreground">Sarah Johnson</h1>
-                <p className="text-muted-foreground">sarah.johnson@email.com</p>
+                <h1 className="text-2xl font-bold text-foreground">{profile?.full_name || "User"}</h1>
+                <p className="text-muted-foreground">{profile?.email || user?.email}</p>
                 <div className="flex flex-wrap justify-center md:justify-start gap-4 mt-4 text-sm">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <FileText className="w-4 h-4" />
-                    <span>{mockResumes.length} resumes uploaded</span>
+                    <span>{resumes.length} resumes</span>
                   </div>
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Bookmark className="w-4 h-4" />
-                    <span>{mockSavedJobs.length} jobs saved</span>
+                    <span>{savedJobs.length} saved jobs</span>
                   </div>
                 </div>
               </div>
-              <Link to="/upload" className="btn-primary">
-                Upload New Resume
-              </Link>
+              <div className="flex gap-3">
+                <Link to="/resume-builder" className="btn-secondary">
+                  <PenTool className="w-4 h-4" /> Build Resume
+                </Link>
+                <Link to="/upload" className="btn-primary">Upload Resume</Link>
+              </div>
             </div>
           </div>
 
-          {/* Tabs */}
           <div className="flex items-center gap-2 mb-6 border-b border-border">
-            <button
-              onClick={() => setActiveTab("resumes")}
-              className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 -mb-px ${
-                activeTab === "resumes"
-                  ? "text-primary border-primary"
-                  : "text-muted-foreground border-transparent hover:text-foreground"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                My Resumes
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab("saved")}
-              className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 -mb-px ${
-                activeTab === "saved"
-                  ? "text-primary border-primary"
-                  : "text-muted-foreground border-transparent hover:text-foreground"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Bookmark className="w-4 h-4" />
-                Saved Jobs
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab("history")}
-              className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 -mb-px ${
-                activeTab === "history"
-                  ? "text-primary border-primary"
-                  : "text-muted-foreground border-transparent hover:text-foreground"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4" />
-                History
-              </div>
-            </button>
+            {[
+              { key: "resumes" as const, icon: FileText, label: "My Resumes" },
+              { key: "saved" as const, icon: Bookmark, label: "Saved Jobs" },
+              { key: "applications" as const, icon: Clock, label: "Applications" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-4 py-3 font-medium text-sm transition-colors border-b-2 -mb-px ${
+                  activeTab === tab.key
+                    ? "text-primary border-primary"
+                    : "text-muted-foreground border-transparent hover:text-foreground"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <tab.icon className="w-4 h-4" />
+                  {tab.label}
+                </div>
+              </button>
+            ))}
           </div>
 
-          {/* Tab Content */}
           <div className="space-y-4">
-            {/* Resumes Tab */}
-            {activeTab === "resumes" && (
-              <>
-                {mockResumes.map((resume) => (
-                  <div key={resume.id} className="card-elevated p-6">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        <FileText className="w-6 h-6 text-primary" />
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-foreground truncate">
-                          {resume.filename}
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                          Uploaded on {resume.uploadedAt} • {resume.jobsMatched} job matches
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <MatchScoreRing score={resume.matchScore} size="sm" />
-
-                        <div className="relative">
+            {activeTab === "resumes" && resumes.map((resume) => (
+              <div key={resume.id} className="card-elevated p-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-6 h-6 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-foreground truncate">{resume.file_name}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {new Date(resume.created_at).toLocaleDateString()}
+                      {resume.parsed_skills?.length > 0 && ` • ${resume.parsed_skills.length} skills detected`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <MatchScoreRing score={resume.overall_score || 0} size="sm" />
+                    <div className="relative">
+                      <button
+                        onClick={() => setOpenMenu(openMenu === resume.id ? null : resume.id)}
+                        className="p-2 rounded-lg hover:bg-muted text-muted-foreground"
+                      >
+                        <MoreVertical className="w-5 h-5" />
+                      </button>
+                      {openMenu === resume.id && (
+                        <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[160px] z-10">
+                          <Link to="/dashboard" className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted">
+                            <Eye className="w-4 h-4" /> View Analysis
+                          </Link>
                           <button
-                            onClick={() =>
-                              setOpenMenu(openMenu === resume.id ? null : resume.id)
-                            }
-                            className="p-2 rounded-lg hover:bg-muted text-muted-foreground"
+                            onClick={() => handleDeleteResume(resume.id)}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-muted"
                           >
-                            <MoreVertical className="w-5 h-5" />
+                            <Trash2 className="w-4 h-4" /> Delete
                           </button>
-
-                          {openMenu === resume.id && (
-                            <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-xl shadow-lg py-1 min-w-[160px] z-10">
-                              <button className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted">
-                                <Eye className="w-4 h-4" />
-                                View Details
-                              </button>
-                              <button className="w-full flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted">
-                                <RefreshCw className="w-4 h-4" />
-                                Re-analyze
-                              </button>
-                              <button className="w-full flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-muted">
-                                <Trash2 className="w-4 h-4" />
-                                Delete
-                              </button>
-                            </div>
-                          )}
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
-                ))}
-              </>
-            )}
-
-            {/* Saved Jobs Tab */}
-            {activeTab === "saved" && (
-              <>
-                {mockSavedJobs.map((job) => (
-                  <div key={job.id} className="card-elevated p-6">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-foreground">{job.title}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          {job.company} • Saved on {job.savedAt}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <MatchScoreRing score={job.matchScore} size="sm" />
-                        <button className="btn-primary text-sm py-2 px-4">
-                          View Job
-                          <ArrowRight className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-
-            {/* History Tab */}
-            {activeTab === "history" && (
-              <div className="card-elevated p-6">
-                <div className="space-y-4">
-                  {mockHistory.map((item, index) => (
-                    <div
-                      key={item.id}
-                      className={`flex items-start gap-4 pb-4 ${
-                        index !== mockHistory.length - 1 ? "border-b border-border" : ""
-                      }`}
-                    >
-                      <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                        <Clock className="w-5 h-5 text-muted-foreground" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-foreground">{item.action}</p>
-                        <p className="text-sm text-muted-foreground truncate">{item.details}</p>
-                        <p className="text-xs text-muted-foreground mt-1">{item.timestamp}</p>
-                      </div>
-                    </div>
-                  ))}
                 </div>
               </div>
+            ))}
+
+            {activeTab === "saved" && savedJobs.map((saved) => (
+              <div key={saved.id} className="card-elevated p-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-foreground">{saved.jobs?.title}</h3>
+                    <p className="text-sm text-muted-foreground">{saved.jobs?.company} • {saved.jobs?.location}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => handleUnsaveJob(saved.id)} className="btn-secondary text-sm py-2 px-3">
+                      <Bookmark className="w-4 h-4 fill-current" /> Unsave
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {activeTab === "applications" && applications.map((app) => (
+              <div key={app.id} className="card-elevated p-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-medium text-foreground">{app.jobs?.title}</h3>
+                    <p className="text-sm text-muted-foreground">{app.jobs?.company}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                      app.status === "applied" ? "bg-primary/10 text-primary" :
+                      app.status === "shortlisted" ? "bg-success/10 text-success" :
+                      app.status === "rejected" ? "bg-destructive/10 text-destructive" :
+                      "bg-accent/10 text-accent"
+                    }`}>
+                      {app.status}
+                    </span>
+                    {app.match_score > 0 && <MatchScoreRing score={app.match_score} size="sm" />}
+                  </div>
+                </div>
+              </div>
+            ))}
+
+            {activeTab === "resumes" && resumes.length === 0 && (
+              <div className="card-elevated p-12 text-center">
+                <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No resumes uploaded yet.</p>
+                <Link to="/upload" className="btn-primary mt-4 inline-flex">Upload Resume</Link>
+              </div>
             )}
+            {activeTab === "saved" && savedJobs.length === 0 && (
+              <div className="card-elevated p-12 text-center">
+                <Bookmark className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No saved jobs yet.</p>
+                <Link to="/jobs" className="btn-primary mt-4 inline-flex">Browse Jobs</Link>
+              </div>
+            )}
+            {activeTab === "applications" && applications.length === 0 && (
+              <div className="card-elevated p-12 text-center">
+                <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">No applications yet.</p>
+                <Link to="/jobs" className="btn-primary mt-4 inline-flex">Find Jobs</Link>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-8 text-center">
+            <button onClick={signOut} className="text-sm text-muted-foreground hover:text-destructive transition-colors">
+              Sign Out
+            </button>
           </div>
         </div>
       </div>
