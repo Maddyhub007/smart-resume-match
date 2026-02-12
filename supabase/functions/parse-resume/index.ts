@@ -15,7 +15,7 @@ serve(async (req) => {
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
       { global: { headers: { Authorization: authHeader } } }
     );
 
@@ -24,10 +24,10 @@ serve(async (req) => {
 
     const { resumeId, fileName } = await req.json();
 
-    // Download the file from storage
+    // Download the file from storage (fileName is already the full path)
     const { data: fileData, error: downloadError } = await supabase.storage
       .from("resumes")
-      .download(`${user.id}/${fileName}`);
+      .download(fileName);
 
     if (downloadError) throw new Error("Failed to download resume: " + downloadError.message);
 
