@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Send, Calendar, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Calendar, Loader2, LinkIcon, MessageSquare } from "lucide-react";
 import Layout from "@/components/layout/Layout";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,14 +17,13 @@ const Chat = () => {
   const [otherUser, setOtherUser] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showScheduler, setShowScheduler] = useState(false);
-  const [scheduleForm, setScheduleForm] = useState({ date: "", time: "", notes: "" });
+  const [scheduleForm, setScheduleForm] = useState({ date: "", time: "", link: "", notes: "" });
 
   useEffect(() => {
     if (conversationId) fetchData();
   }, [conversationId]);
 
   useEffect(() => {
-    // Real-time subscription
     const channel = supabase
       .channel(`messages-${conversationId}`)
       .on("postgres_changes", {
@@ -33,7 +32,11 @@ const Chat = () => {
         table: "messages",
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
-        setMessages((prev) => [...prev, payload.new]);
+        setMessages((prev) => {
+          // Avoid duplicates
+          if (prev.some((m) => m.id === payload.new.id)) return prev;
+          return [...prev, payload.new];
+        });
       })
       .subscribe();
 
@@ -54,7 +57,6 @@ const Chat = () => {
     setConversation(convRes.data);
     setMessages(msgsRes.data || []);
 
-    // Get the other user's profile
     if (convRes.data) {
       const otherId = convRes.data.recruiter_id === user!.id ? convRes.data.candidate_id : convRes.data.recruiter_id;
       const { data: prof } = await supabase.from("profiles").select("full_name, email").eq("user_id", otherId).single();
@@ -84,9 +86,8 @@ const Chat = () => {
     });
 
     if (error) {
-      toast({ title: "Error sending message", variant: "destructive" });
+      toast({ title: "Error sending message", description: error.message, variant: "destructive" });
     } else {
-      // Update last_message_at
       await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", conversationId!);
     }
     setInput("");
@@ -98,10 +99,10 @@ const Chat = () => {
       toast({ title: "Please select date and time", variant: "destructive" });
       return;
     }
-    const content = `📅 Interview Scheduled\nDate: ${scheduleForm.date}\nTime: ${scheduleForm.time}${scheduleForm.notes ? `\nNotes: ${scheduleForm.notes}` : ""}`;
+    const content = `📅 Interview Scheduled\n\nDate: ${scheduleForm.date}\nTime: ${scheduleForm.time}${scheduleForm.link ? `\nMeeting Link: ${scheduleForm.link}` : ""}${scheduleForm.notes ? `\nNotes: ${scheduleForm.notes}` : ""}\n\nPlease confirm your availability.`;
     sendMessage(content, "interview_invite", scheduleForm);
     setShowScheduler(false);
-    setScheduleForm({ date: "", time: "", notes: "" });
+    setScheduleForm({ date: "", time: "", link: "", notes: "" });
   };
 
   if (loading) {
@@ -114,18 +115,18 @@ const Chat = () => {
         <div className="container mx-auto max-w-4xl flex flex-col h-full">
           {/* Header */}
           <div className="flex items-center gap-4 mb-4 pb-4 border-b border-border">
-            <Link to={role === "recruiter" ? "/recruiter" : "/profile"} className="p-2 rounded-lg hover:bg-muted">
+            <Link to="/messages" className="p-2 rounded-lg hover:bg-muted">
               <ArrowLeft className="w-5 h-5 text-muted-foreground" />
             </Link>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <h2 className="font-semibold text-foreground">{otherUser?.full_name || "User"}</h2>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground truncate">
                 {conversation?.jobs ? `Re: ${(conversation.jobs as any).title} at ${(conversation.jobs as any).company}` : "Direct message"}
               </p>
             </div>
             {role === "recruiter" && (
-              <button onClick={() => setShowScheduler(!showScheduler)} className="btn-secondary text-sm py-2 px-3">
-                <Calendar className="w-4 h-4" /> Schedule Interview
+              <button onClick={() => setShowScheduler(!showScheduler)} className="btn-secondary text-sm py-2 px-3 flex items-center gap-1.5">
+                <Calendar className="w-4 h-4" /> Schedule
               </button>
             )}
           </div>
@@ -135,19 +136,48 @@ const Chat = () => {
             <div className="card-elevated p-4 mb-4 space-y-3">
               <h4 className="font-semibold text-foreground text-sm">Schedule Interview</h4>
               <div className="grid grid-cols-2 gap-3">
-                <input type="date" value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} className="input-field text-sm" />
-                <input type="time" value={scheduleForm.time} onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })} className="input-field text-sm" />
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Date</label>
+                  <input type="date" value={scheduleForm.date} onChange={(e) => setScheduleForm({ ...scheduleForm, date: e.target.value })} className="input-field text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Time</label>
+                  <input type="time" value={scheduleForm.time} onChange={(e) => setScheduleForm({ ...scheduleForm, time: e.target.value })} className="input-field text-sm" />
+                </div>
               </div>
-              <input value={scheduleForm.notes} onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })} placeholder="Additional notes..." className="input-field text-sm" />
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Meeting Link (Zoom, Google Meet, etc.)</label>
+                <input
+                  value={scheduleForm.link}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, link: e.target.value })}
+                  placeholder="https://meet.google.com/..."
+                  className="input-field text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Additional Notes</label>
+                <input
+                  value={scheduleForm.notes}
+                  onChange={(e) => setScheduleForm({ ...scheduleForm, notes: e.target.value })}
+                  placeholder="e.g. Bring your portfolio..."
+                  className="input-field text-sm"
+                />
+              </div>
               <div className="flex gap-2">
                 <button onClick={() => setShowScheduler(false)} className="btn-secondary text-sm py-1.5 px-3">Cancel</button>
-                <button onClick={handleScheduleInterview} className="btn-primary text-sm py-1.5 px-3">Send Invite</button>
+                <button onClick={handleScheduleInterview} className="btn-primary text-sm py-1.5 px-3">Send Interview Invite</button>
               </div>
             </div>
           )}
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto space-y-3 pb-4">
+            {messages.length === 0 && (
+              <div className="text-center py-12">
+                <MessageSquare className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                <p className="text-muted-foreground text-sm">No messages yet. Start the conversation!</p>
+              </div>
+            )}
             {messages.map((msg) => {
               const isMine = msg.sender_id === user!.id;
               const isInterview = msg.message_type === "interview_invite";
@@ -158,8 +188,23 @@ const Chat = () => {
                     isInterview ? "bg-accent/10 border border-accent/20" :
                     isMine ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"
                   }`}>
-                    {isInterview && <Calendar className="w-4 h-4 text-accent mb-1" />}
+                    {isInterview && (
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Calendar className="w-4 h-4 text-accent" />
+                        <span className="text-xs font-medium text-accent">Interview Invite</span>
+                      </div>
+                    )}
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    {isInterview && msg.metadata?.link && (
+                      <a
+                        href={msg.metadata.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 mt-2 text-xs text-primary hover:underline"
+                      >
+                        <LinkIcon className="w-3 h-3" /> Join Meeting
+                      </a>
+                    )}
                     <p className={`text-xs mt-1 ${isMine && !isInterview ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                       {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </p>
