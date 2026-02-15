@@ -1,10 +1,27 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import pdf from "npm:pdf-parse/lib/pdf-parse.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+async function extractText(fileData: Blob, fileName: string): Promise<string> {
+  const lowerName = fileName.toLowerCase();
+  
+  if (lowerName.endsWith(".pdf")) {
+    // Use pdf-parse for PDF files
+    const arrayBuffer = await fileData.arrayBuffer();
+    const buffer = new Uint8Array(arrayBuffer);
+    const data = await pdf(buffer);
+    console.log("PDF parsed, pages:", data.numpages, "text length:", data.text.length);
+    return data.text;
+  }
+  
+  // For DOCX, TXT, and other text-based formats, read as text
+  return await fileData.text();
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -30,9 +47,13 @@ serve(async (req) => {
 
     if (downloadError) throw new Error("Failed to download resume: " + downloadError.message);
 
-    const text = await fileData.text();
-    console.log("Resume text length:", text.length);
-    console.log("Resume text preview (first 500 chars):", text.substring(0, 500));
+    const text = await extractText(fileData, fileName);
+    console.log("Extracted text length:", text.length);
+    console.log("Extracted text preview (first 800 chars):", text.substring(0, 800));
+
+    if (!text || text.trim().length < 20) {
+      throw new Error("Could not extract meaningful text from the file. The file may be image-based or corrupted.");
+    }
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("AI key not configured");
