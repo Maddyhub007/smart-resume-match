@@ -1,22 +1,78 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Pure-JS PDF text extraction (no Node.js fs dependency)
+function extractTextFromPdfBytes(bytes: Uint8Array): string {
+  let raw = "";
+  for (let i = 0; i < bytes.length; i++) {
+    raw += String.fromCharCode(bytes[i]);
+  }
+
+  const textChunks: string[] = [];
+  const btEtRegex = /BT([\s\S]*?)ET/g;
+  let btMatch;
+  while ((btMatch = btEtRegex.exec(raw)) !== null) {
+    const block = btMatch[1];
+    const tjRegex = /\(([^)]*)\)\s*(?:Tj|')/g;
+    let tjMatch;
+    while ((tjMatch = tjRegex.exec(block)) !== null) {
+      textChunks.push(tjMatch[1]);
+    }
+    const hexRegex = /<([0-9A-Fa-f]+)>\s*(?:Tj|')/g;
+    let hexMatch;
+    while ((hexMatch = hexRegex.exec(block)) !== null) {
+      const hex = hexMatch[1];
+      let s = "";
+      for (let i = 0; i < hex.length; i += 2) {
+        s += String.fromCharCode(parseInt(hex.substring(i, i + 2), 16));
+      }
+      textChunks.push(s);
+    }
+    const tjArrayRegex = /\[((?:\([^)]*\)|<[^>]*>|[^])*?)\]\s*TJ/gi;
+    let arrMatch;
+    while ((arrMatch = tjArrayRegex.exec(block)) !== null) {
+      const inner = arrMatch[1];
+      const parts = /\(([^)]*)\)/g;
+      let p;
+      while ((p = parts.exec(inner)) !== null) {
+        textChunks.push(p[1]);
+      }
+    }
+  }
+
+  let text = textChunks.join(" ")
+    .replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t")
+    .replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1")
+    .replace(/\s+/g, " ").trim();
+
+  // If regex got very little, PDF likely uses compressed streams – extract readable ASCII
+  if (text.length < 50) {
+    console.log("Regex extraction got little text, trying fallback...");
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    const decoded = decoder.decode(bytes);
+    const asciiChunks = decoded.match(/[\x20-\x7E]{4,}/g) || [];
+    const fallback = asciiChunks
+      .filter((c: string) => !/^[%\/\[\]<>{}\\]+$/.test(c))
+      .join(" ");
+    if (fallback.length > text.length) return fallback;
+  }
+  return text;
+}
+
 async function extractText(fileData: Blob, fileName: string): Promise<string> {
   const lowerName = fileName.toLowerCase();
-  
   if (lowerName.endsWith(".pdf")) {
-    const { default: pdfParse } = await import("https://esm.sh/pdf-parse@1.1.1");
     const arrayBuffer = await fileData.arrayBuffer();
-    const buffer = new Uint8Array(arrayBuffer);
-    const data = await pdfParse(buffer);
-    console.log("PDF parsed, pages:", data.numpages, "text length:", data.text.length);
-    return data.text;
+    const bytes = new Uint8Array(arrayBuffer);
+    const text = extractTextFromPdfBytes(bytes);
+    console.log("PDF text extracted, length:", text.length);
+    return text;
   }
-  
   return await fileData.text();
 }
 
