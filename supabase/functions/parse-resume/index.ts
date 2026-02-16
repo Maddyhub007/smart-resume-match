@@ -1,7 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import pdf from "npm:pdf-parse/lib/pdf-parse.js";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
@@ -11,15 +9,14 @@ async function extractText(fileData: Blob, fileName: string): Promise<string> {
   const lowerName = fileName.toLowerCase();
   
   if (lowerName.endsWith(".pdf")) {
-    // Use pdf-parse for PDF files
+    const { default: pdfParse } = await import("https://esm.sh/pdf-parse@1.1.1");
     const arrayBuffer = await fileData.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
-    const data = await pdf(buffer);
+    const data = await pdfParse(buffer);
     console.log("PDF parsed, pages:", data.numpages, "text length:", data.text.length);
     return data.text;
   }
   
-  // For DOCX, TXT, and other text-based formats, read as text
   return await fileData.text();
 }
 
