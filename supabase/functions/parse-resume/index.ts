@@ -6,24 +6,99 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Pure-JS PDF text extraction (no Node.js fs dependency)
-function extractTextFromPdfBytes(bytes: Uint8Array): string {
-  let raw = "";
-  for (let i = 0; i < bytes.length; i++) {
-    raw += String.fromCharCode(bytes[i]);
+// Decompress a FlateDecode (zlib/deflate) stream using Deno's built-in DecompressionStream
+async function inflateRaw(compressed: Uint8Array): Promise<Uint8Array> {
+  try {
+    // Try raw deflate first
+    const ds = new DecompressionStream("raw");
+    const writer = ds.writable.getWriter();
+    const reader = ds.readable.getReader();
+    writer.write(compressed);
+    writer.close();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    const total = chunks.reduce((a, c) => a + c.length, 0);
+    const result = new Uint8Array(total);
+    let offset = 0;
+    for (const c of chunks) { result.set(c, offset); offset += c.length; }
+    return result;
+  } catch {
+    try {
+      // Try deflate (with zlib header) 
+      const ds = new DecompressionStream("deflate");
+      const writer = ds.writable.getWriter();
+      const reader = ds.readable.getReader();
+      writer.write(compressed);
+      writer.close();
+      const chunks: Uint8Array[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const total = chunks.reduce((a, c) => a + c.length, 0);
+      const result = new Uint8Array(total);
+      let offset = 0;
+      for (const c of chunks) { result.set(c, offset); offset += c.length; }
+      return result;
+    } catch {
+      return new Uint8Array(0);
+    }
   }
+}
 
+// Extract text from uncompressed PDF content (BT..ET blocks)
+function extractTextFromContent(raw: string): string[] {
   const textChunks: string[] = [];
   const btEtRegex = /BT([\s\S]*?)ET/g;
   let btMatch;
   while ((btMatch = btEtRegex.exec(raw)) !== null) {
     const block = btMatch[1];
-    const tjRegex = /\(([^)]*)\)\s*(?:Tj|')/g;
+    
+    // TJ arrays: [(text) kerning (text) ...] TJ
+    const tjArrayRegex = /\[((?:\([^)]*\)|<[^>]*>|[-\d.]+\s*)*)\]\s*TJ/gi;
+    let arrMatch;
+    while ((arrMatch = tjArrayRegex.exec(block)) !== null) {
+      const inner = arrMatch[1];
+      const parts = /\(([^)]*)\)/g;
+      let p;
+      while ((p = parts.exec(inner)) !== null) {
+        textChunks.push(p[1]);
+      }
+      // hex in TJ arrays
+      const hexParts = /<([0-9A-Fa-f]+)>/g;
+      let hp;
+      while ((hp = hexParts.exec(inner)) !== null) {
+        const hex = hp[1];
+        let s = "";
+        for (let i = 0; i < hex.length; i += 4) {
+          const code = parseInt(hex.substring(i, i + 4), 16);
+          if (code > 0 && code < 0xFFFE) s += String.fromCharCode(code);
+        }
+        if (!s) {
+          s = "";
+          for (let i = 0; i < hex.length; i += 2) {
+            const code = parseInt(hex.substring(i, i + 2), 16);
+            if (code > 31) s += String.fromCharCode(code);
+          }
+        }
+        if (s.trim()) textChunks.push(s);
+      }
+    }
+    
+    // Single Tj: (text) Tj
+    const tjRegex = /\(([^)]*)\)\s*Tj/g;
     let tjMatch;
     while ((tjMatch = tjRegex.exec(block)) !== null) {
       textChunks.push(tjMatch[1]);
     }
-    const hexRegex = /<([0-9A-Fa-f]+)>\s*(?:Tj|')/g;
+    
+    // Hex Tj: <hex> Tj
+    const hexRegex = /<([0-9A-Fa-f]+)>\s*Tj/g;
     let hexMatch;
     while ((hexMatch = hexRegex.exec(block)) !== null) {
       const hex = hexMatch[1];
@@ -33,15 +108,45 @@ function extractTextFromPdfBytes(bytes: Uint8Array): string {
       }
       textChunks.push(s);
     }
-    const tjArrayRegex = /\[((?:\([^)]*\)|<[^>]*>|[^])*?)\]\s*TJ/gi;
-    let arrMatch;
-    while ((arrMatch = tjArrayRegex.exec(block)) !== null) {
-      const inner = arrMatch[1];
-      const parts = /\(([^)]*)\)/g;
-      let p;
-      while ((p = parts.exec(inner)) !== null) {
-        textChunks.push(p[1]);
-      }
+  }
+  return textChunks;
+}
+
+// Main PDF text extraction - handles compressed streams
+async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
+  // Convert to string for regex matching of PDF structure
+  let raw = "";
+  for (let i = 0; i < bytes.length; i++) {
+    raw += String.fromCharCode(bytes[i]);
+  }
+
+  // 1. Try extracting from uncompressed content first
+  let textChunks = extractTextFromContent(raw);
+
+  // 2. Find and decompress FlateDecode streams
+  const streamRegex = /\/FlateDecode[\s\S]*?stream\r?\n/g;
+  let sMatch;
+  const streamPositions: number[] = [];
+  while ((sMatch = streamRegex.exec(raw)) !== null) {
+    streamPositions.push(sMatch.index + sMatch[0].length);
+  }
+
+  for (const startPos of streamPositions) {
+    const endPos = raw.indexOf("endstream", startPos);
+    if (endPos === -1) continue;
+    
+    const compressedBytes = bytes.slice(startPos, endPos);
+    try {
+      const decompressed = await inflateRaw(compressedBytes);
+      if (decompressed.length === 0) continue;
+      
+      const decoder = new TextDecoder("latin1");
+      const decompressedStr = decoder.decode(decompressed);
+      
+      const streamTextChunks = extractTextFromContent(decompressedStr);
+      textChunks = textChunks.concat(streamTextChunks);
+    } catch {
+      // Skip undecompressable streams
     }
   }
 
@@ -50,17 +155,18 @@ function extractTextFromPdfBytes(bytes: Uint8Array): string {
     .replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1")
     .replace(/\s+/g, " ").trim();
 
-  // If regex got very little, PDF likely uses compressed streams – extract readable ASCII
+  // 3. Fallback: extract readable ASCII sequences
   if (text.length < 50) {
-    console.log("Regex extraction got little text, trying fallback...");
+    console.log("Stream extraction got little text, trying ASCII fallback...");
     const decoder = new TextDecoder("utf-8", { fatal: false });
     const decoded = decoder.decode(bytes);
     const asciiChunks = decoded.match(/[\x20-\x7E]{4,}/g) || [];
     const fallback = asciiChunks
-      .filter((c: string) => !/^[%\/\[\]<>{}\\]+$/.test(c))
+      .filter((c: string) => !/^[%\/\[\]<>{}\\]+$/.test(c) && !/^[\d\s.]+$/.test(c))
       .join(" ");
-    if (fallback.length > text.length) return fallback;
+    if (fallback.length > text.length) text = fallback;
   }
+
   return text;
 }
 
@@ -69,7 +175,7 @@ async function extractText(fileData: Blob, fileName: string): Promise<string> {
   if (lowerName.endsWith(".pdf")) {
     const arrayBuffer = await fileData.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-    const text = extractTextFromPdfBytes(bytes);
+    const text = await extractTextFromPdfBytes(bytes);
     console.log("PDF text extracted, length:", text.length);
     return text;
   }
@@ -129,15 +235,16 @@ CRITICAL RULES:
 2. Extract the REAL email, phone, and location exactly as written in the resume.
 3. Extract ALL education entries with the EXACT degree name, institution name, and graduation year as written.
 4. Extract ALL work experience entries with EXACT job titles, company names, and durations as written.
-5. Extract ALL skills mentioned anywhere in the resume.
+5. Extract ALL skills mentioned anywhere in the resume - technical skills, soft skills, tools, frameworks, languages, certifications.
 6. Write a professional summary based on the ACTUAL content of the resume.
 7. Score the resume quality from 0-100 based on completeness, formatting indicators, and skill diversity.
 
-If any field is not found in the resume, return null for strings or empty arrays for lists. NEVER fabricate or guess information.`,
+If any field is not found in the resume, return null for strings or empty arrays for lists. NEVER fabricate or guess information.
+The text may contain some garbled characters from PDF extraction - try to make sense of the content despite minor extraction artifacts.`,
           },
           {
             role: "user",
-            content: `Parse this resume text and extract all information EXACTLY as written. Do not invent or guess any data:\n\n${text.substring(0, 12000)}`,
+            content: `Parse this resume text and extract all information EXACTLY as written. Do not invent or guess any data:\n\n${text.substring(0, 15000)}`,
           },
         ],
         tools: [
