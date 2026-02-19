@@ -113,16 +113,50 @@ const Jobs = () => {
     }
   };
 
-  const filteredJobs = jobs.filter((job) => {
-    if (filters.matchScore && job.matchScore < parseInt(filters.matchScore)) return false;
-    if (filters.location) {
-      const locMap: Record<string, string> = {
-        remote: "remote", "san-francisco": "san francisco", "new-york": "new york", seattle: "seattle", austin: "austin",
-      };
-      if (!job.location?.toLowerCase().includes(locMap[filters.location] || "")) return false;
+ const filteredJobs = jobs.filter((job) => {
+  // Match Score Filter
+  if (filters.matchScore && job.matchScore < parseInt(filters.matchScore)) {
+    return false;
+  }
+
+  // Location Filter
+  if (filters.location) {
+    const locMap: Record<string, string> = {
+      remote: "remote",
+      "san-francisco": "san francisco",
+      "new-york": "new york",
+      seattle: "seattle",
+      austin: "austin",
+    };
+
+    const selectedLocation = locMap[filters.location] || filters.location;
+
+    if (!job.location?.toLowerCase().includes(selectedLocation)) {
+      return false;
     }
-    return true;
-  });
+  }
+
+  // ✅ Experience Level Filter (NEW)
+  if (filters.experience) {
+    const expMap: Record<string, string[]> = {
+      internship: ["intern", "internship"],
+      entry: ["entry", "junior", "fresher"],
+      mid: ["mid", "intermediate"],
+      senior: ["senior", "lead", "principal"],
+    };
+
+    const jobExp = (job.experience_level || "").toLowerCase();
+    const allowedKeywords = expMap[filters.experience] || [];
+
+    const matchesExperience = allowedKeywords.some((keyword) =>
+      jobExp.includes(keyword)
+    );
+
+    if (!matchesExperience) return false;
+  }
+
+  return true;
+});
 
   return (
     <Layout>
