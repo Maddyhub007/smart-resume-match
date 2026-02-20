@@ -1,4 +1,4 @@
-import { User, Briefcase, GraduationCap, Mail, Phone, MapPin, Star } from "lucide-react";
+import { User, Briefcase, GraduationCap, Mail, Phone, MapPin, Star, Lightbulb, AlertTriangle, TrendingUp } from "lucide-react";
 import SkillTag from "../ui/SkillTag";
 
 interface ParsedResume {
@@ -19,6 +19,11 @@ interface ParsedResume {
   }[];
   summary: string;
   overall_score?: number;
+  improvement_tips?: {
+    type: "warning" | "suggestion" | "improvement";
+    skill: string;
+    message: string;
+  }[];
 }
 
 interface ParsedResumePreviewProps {
@@ -45,18 +50,34 @@ const ScoreRing = ({ score }: { score: number }) => {
 };
 
 const ParsedResumePreview = ({ resume }: ParsedResumePreviewProps) => {
+  const getTipIcon = (type: string) => {
+    switch (type) {
+      case "warning": return AlertTriangle;
+      case "suggestion": return Lightbulb;
+      default: return TrendingUp;
+    }
+  };
+
+  const getTipStyles = (type: string) => {
+    switch (type) {
+      case "warning": return "bg-destructive/10 text-destructive border-destructive/20";
+      case "suggestion": return "bg-accent/10 text-accent border-accent/20";
+      default: return "bg-primary/10 text-primary border-primary/20";
+    }
+  };
+
   return (
     <div className="space-y-5">
-      {/* ── Header Card ── */}
-      <div className="card-elevated p-6">
-        <div className="flex items-start gap-5">
-          <div className="w-16 h-16 rounded-2xl gradient-primary flex items-center justify-center flex-shrink-0 shadow-md">
-            <User className="w-8 h-8 text-primary-foreground" />
+      {/* Header Card */}
+      <div className="card-elevated p-4 sm:p-6">
+        <div className="flex flex-col sm:flex-row items-start gap-4 sm:gap-5">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl gradient-primary flex items-center justify-center flex-shrink-0 shadow-md">
+            <User className="w-7 h-7 sm:w-8 sm:h-8 text-primary-foreground" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">
+                <h2 className="text-xl sm:text-2xl font-bold text-foreground">
                   {resume.name || "—"}
                 </h2>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2">
@@ -66,7 +87,7 @@ const ParsedResumePreview = ({ resume }: ParsedResumePreviewProps) => {
                       className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors"
                     >
                       <Mail className="w-3.5 h-3.5" />
-                      {resume.email}
+                      <span className="truncate max-w-[200px]">{resume.email}</span>
                     </a>
                   )}
                   {resume.phone && (
@@ -91,20 +112,20 @@ const ParsedResumePreview = ({ resume }: ParsedResumePreviewProps) => {
         </div>
       </div>
 
-      {/* ── Summary ── */}
+      {/* Summary */}
       {resume.summary && (
-        <div className="card-elevated p-6">
+        <div className="card-elevated p-4 sm:p-6">
           <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
             <span className="w-1.5 h-5 rounded-full gradient-primary inline-block" />
             Professional Summary
           </h3>
-          <p className="text-muted-foreground leading-relaxed">{resume.summary}</p>
+          <p className="text-muted-foreground leading-relaxed text-sm sm:text-base">{resume.summary}</p>
         </div>
       )}
 
-      {/* ── Skills ── */}
+      {/* Skills */}
       {resume.skills?.length > 0 && (
-        <div className="card-elevated p-6">
+        <div className="card-elevated p-4 sm:p-6">
           <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
             <span className="w-1.5 h-5 rounded-full gradient-primary inline-block" />
             Skills
@@ -124,13 +145,12 @@ const ParsedResumePreview = ({ resume }: ParsedResumePreviewProps) => {
         </div>
       )}
 
-      {/* ── Experience & Education side by side on large screens ── */}
+      {/* Experience & Education */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Experience */}
         {resume.experience?.length > 0 && (
-          <div className="card-elevated p-6">
+          <div className="card-elevated p-4 sm:p-6">
             <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-              <Briefcase className="w-4.5 h-4.5 text-primary" />
+              <Briefcase className="w-4 h-4 text-primary" />
               Experience
               <span className="ml-auto text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                 {resume.experience.length}
@@ -156,11 +176,10 @@ const ParsedResumePreview = ({ resume }: ParsedResumePreviewProps) => {
           </div>
         )}
 
-        {/* Education */}
         {resume.education?.length > 0 && (
-          <div className="card-elevated p-6">
+          <div className="card-elevated p-4 sm:p-6">
             <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-              <GraduationCap className="w-4.5 h-4.5 text-accent" />
+              <GraduationCap className="w-4 h-4 text-accent" />
               Education
               <span className="ml-auto text-xs font-normal text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                 {resume.education.length}
@@ -182,6 +201,33 @@ const ParsedResumePreview = ({ resume }: ParsedResumePreviewProps) => {
           </div>
         )}
       </div>
+
+      {/* Improvement Tips */}
+      {resume.improvement_tips && resume.improvement_tips.length > 0 && (
+        <div className="card-elevated p-4 sm:p-6">
+          <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+            <Lightbulb className="w-5 h-5 text-accent" />
+            Personalized Improvement Tips
+          </h3>
+          <div className="space-y-3">
+            {resume.improvement_tips.map((tip, index) => {
+              const Icon = getTipIcon(tip.type);
+              return (
+                <div
+                  key={index}
+                  className={`flex items-start gap-3 p-3 sm:p-4 rounded-xl border ${getTipStyles(tip.type)}`}
+                >
+                  <Icon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-sm">{tip.skill}</p>
+                    <p className="text-sm opacity-80 mt-1">{tip.message}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

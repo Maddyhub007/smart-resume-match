@@ -37,7 +37,6 @@ const Upload = () => {
     setUploadProgress(0);
 
     try {
-      // Simulate smooth upload progress
       const interval = setInterval(() => {
         setUploadProgress((prev) => Math.min(prev + 12, 90));
       }, 180);
@@ -63,7 +62,6 @@ const Upload = () => {
       setIsParsing(true);
       setParseStep(0);
 
-      // Cycle through parse steps for UX
       const stepInterval = setInterval(() => {
         setParseStep((prev) => Math.min(prev + 1, PARSE_STEPS.length - 1));
       }, 2500);
@@ -79,6 +77,12 @@ const Upload = () => {
       if (parseData?.error) throw new Error(parseData.error);
 
       setParsedResume(parseData.parsed);
+      
+      // Cache improvement tips for dashboard
+      if (parseData.parsed?.improvement_tips && resumeData.id) {
+        localStorage.setItem(`resume_tips_${resumeData.id}`, JSON.stringify(parseData.parsed.improvement_tips));
+      }
+      
       setIsParsing(false);
       toast({ title: "Resume analysed successfully! 🎉" });
     } catch (error: any) {
@@ -99,11 +103,10 @@ const Upload = () => {
 
   return (
     <Layout>
-      <div className="py-14 px-4">
+      <div className="py-8 sm:py-14 px-4">
         <div className="container mx-auto max-w-4xl">
-
-          {/* ── Page header ── */}
-          <div className="text-center mb-10">
+          {/* Page header */}
+          <div className="text-center mb-8 sm:mb-10">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-5">
               <Sparkles className="w-4 h-4" />
               AI-Powered Resume Analysis
@@ -115,20 +118,20 @@ const Upload = () => {
             </p>
           </div>
 
-          {/* ── Progress steps (top of page) ── */}
+          {/* Progress steps */}
           {!parsedResume && (
             <div className="flex items-center justify-center gap-2 mb-8">
               {["Upload", "Parse", "Match"].map((step, i) => (
                 <div key={step} className="flex items-center gap-2">
                   <div
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-all ${
                       i === 0
                         ? "gradient-primary text-primary-foreground shadow-sm"
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
                     <span
-                      className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+                      className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold ${
                         i === 0 ? "bg-white/20" : "bg-border"
                       }`}
                     >
@@ -136,13 +139,13 @@ const Upload = () => {
                     </span>
                     {step}
                   </div>
-                  {i < 2 && <div className="w-6 h-px bg-border" />}
+                  {i < 2 && <div className="w-4 sm:w-6 h-px bg-border" />}
                 </div>
               ))}
             </div>
           )}
 
-          {/* ── Upload zone ── */}
+          {/* Upload zone */}
           {!parsedResume && (
             <FileUploadZone
               onFileSelect={handleFileSelect}
@@ -153,39 +156,34 @@ const Upload = () => {
             />
           )}
 
-          {/* ── Parsing skeleton / progress ── */}
+          {/* Parsing skeleton */}
           {isParsing && (
             <div className="mt-6 space-y-5">
-              {/* Animated parsing card */}
-              <div className="card-elevated p-8 text-center">
-                <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl gradient-primary shadow-lg mb-5">
-                  <Loader2 className="w-10 h-10 text-primary-foreground animate-spin" />
+              <div className="card-elevated p-6 sm:p-8 text-center">
+                <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-3xl gradient-primary shadow-lg mb-5">
+                  <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 text-primary-foreground animate-spin" />
                 </div>
-                <h3 className="text-xl font-bold text-foreground mb-2">
+                <h3 className="text-lg sm:text-xl font-bold text-foreground mb-2">
                   AI is analysing your resume
                 </h3>
                 <p className="text-muted-foreground text-sm mb-6">
                   {PARSE_STEPS[parseStep]}
                 </p>
-                {/* step dots */}
                 <div className="flex items-center justify-center gap-2">
                   {PARSE_STEPS.map((_, i) => (
                     <div
                       key={i}
                       className={`h-2 rounded-full transition-all duration-500 ${
-                        i <= parseStep
-                          ? "w-6 gradient-primary"
-                          : "w-2 bg-muted"
+                        i <= parseStep ? "w-6 gradient-primary" : "w-2 bg-muted"
                       }`}
                     />
                   ))}
                 </div>
               </div>
 
-              {/* skeleton preview */}
               <div className="card-elevated p-6 animate-pulse">
-                <div className="flex items-start gap-5">
-                  <div className="w-16 h-16 rounded-2xl bg-muted flex-shrink-0" />
+                <div className="flex items-start gap-4 sm:gap-5">
+                  <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-muted flex-shrink-0" />
                   <div className="flex-1 space-y-3">
                     <div className="h-5 bg-muted rounded w-2/5" />
                     <div className="h-3.5 bg-muted rounded w-1/2" />
@@ -204,11 +202,10 @@ const Upload = () => {
             </div>
           )}
 
-          {/* ── Parsed result ── */}
+          {/* Parsed result */}
           {parsedResume && !isParsing && (
             <div className="space-y-6">
-              {/* Success banner */}
-              <div className="flex items-center gap-3 px-5 py-3.5 rounded-xl bg-accent/10 border border-accent/20 text-accent">
+              <div className="flex items-center gap-3 px-4 sm:px-5 py-3.5 rounded-xl bg-accent/10 border border-accent/20 text-accent">
                 <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
                 <p className="text-sm font-medium">
                   Resume analysed successfully! Review the details below and continue.
