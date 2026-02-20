@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { PenTool, Download, Save, Plus, Trash2, Loader2, Link2, Trophy, FolderKanban, AlertCircle } from "lucide-react";
+import { PenTool, Download, Save, Plus, Trash2, Loader2, Link2, Trophy, FolderKanban, AlertCircle, Upload } from "lucide-react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -263,6 +263,47 @@ const ResumeBuilder = () => {
   };
   const removeProject = (i: number) => updateField("projects", resumeData.projects.filter((_, idx) => idx !== i));
 
+  // ─── Import from uploaded resume ─────────────────────────────────────────
+  const [importing, setImporting] = useState(false);
+
+  const handleImportResume = useCallback(async () => {
+    if (!user) return;
+    setImporting(true);
+    try {
+      const { data: latestResume } = await supabase
+        .from("resumes").select("*").eq("user_id", user.id)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+      if (!latestResume || !latestResume.parsed_skills?.length) {
+        toast({ title: "No parsed resume found. Upload and parse a resume first.", variant: "destructive" });
+        setImporting(false);
+        return;
+      }
+
+      setResumeData({
+        ...emptyResume,
+        fullName: latestResume.parsed_name || "",
+        email: latestResume.parsed_email || "",
+        phone: latestResume.parsed_phone || "",
+        location: latestResume.parsed_location || "",
+        summary: latestResume.parsed_summary || "",
+        skills: latestResume.parsed_skills || [],
+        experience: (latestResume.parsed_experience as any[])?.length > 0
+          ? (latestResume.parsed_experience as any[]).map((e: any) => ({ ...e, description: e.description || "" }))
+          : emptyResume.experience,
+        education: (latestResume.parsed_education as any[])?.length > 0
+          ? latestResume.parsed_education as any[]
+          : emptyResume.education,
+      });
+      setErrors({});
+      setTouched({});
+      toast({ title: "Resume data imported! ✅ Edit and customize below." });
+    } catch (err: any) {
+      toast({ title: "Import failed", description: err.message, variant: "destructive" });
+    }
+    setImporting(false);
+  }, [user]);
+
   if (loading) {
     return <Layout><div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div></Layout>;
   }
@@ -271,27 +312,30 @@ const ResumeBuilder = () => {
 
   return (
     <Layout>
-      <div className="py-12 px-4">
+      <div className="py-8 sm:py-12 px-4">
         <div className="container mx-auto max-w-6xl">
 
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
             <div>
               <h1 className="section-title mb-2 flex items-center gap-3">
-                <PenTool className="w-8 h-8 text-primary" /> Resume Builder
+                <PenTool className="w-7 h-7 sm:w-8 sm:h-8 text-primary" /> Resume Builder
               </h1>
-              <p className="text-muted-foreground">Create ATS-friendly resumes with validation</p>
+              <p className="text-muted-foreground text-sm sm:text-base">Create ATS-friendly resumes with validation</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               {errorCount > 0 && (
                 <span className="text-xs text-destructive flex items-center gap-1 font-medium">
                   <AlertCircle className="w-3.5 h-3.5" /> {errorCount} error{errorCount > 1 ? "s" : ""}
                 </span>
               )}
-              <button onClick={handleSave} disabled={saving} className="btn-secondary text-sm py-2 px-4 flex items-center gap-2">
+              <button onClick={handleImportResume} disabled={importing} className="btn-secondary text-xs sm:text-sm py-2 px-3 sm:px-4 flex items-center gap-2">
+                {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Import Resume
+              </button>
+              <button onClick={handleSave} disabled={saving} className="btn-secondary text-xs sm:text-sm py-2 px-3 sm:px-4 flex items-center gap-2">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
               </button>
-              <button onClick={handleDownload} className="btn-primary text-sm py-2 px-4 flex items-center gap-2">
+              <button onClick={handleDownload} className="btn-primary text-xs sm:text-sm py-2 px-3 sm:px-4 flex items-center gap-2">
                 <Download className="w-4 h-4" /> Download
               </button>
             </div>
@@ -319,7 +363,7 @@ const ResumeBuilder = () => {
           {/* Template selection */}
           <div className="mb-8">
             <h3 className="font-semibold text-foreground mb-3">Choose Template</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
               {BUILT_IN_TEMPLATES.map((t) => (
                 <button key={t.id} onClick={() => setSelectedTemplate(t.id)}
                   className={`card-elevated p-4 text-center transition-all hover:scale-105 ${selectedTemplate === t.id ? "border-primary ring-2 ring-primary/25" : ""}`}>
@@ -336,15 +380,15 @@ const ResumeBuilder = () => {
             </div>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-8">
+          <div className="grid lg:grid-cols-2 gap-6 sm:gap-8">
             {/* ── Editor ── */}
-            <div className="space-y-6">
+            <div className="space-y-5 sm:space-y-6">
 
               {/* Personal Info */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4">Personal Info</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div className="col-span-1 sm:col-span-2">
                     <input
                       value={resumeData.fullName}
                       onChange={(e) => updateField("fullName", e.target.value)}
@@ -377,12 +421,12 @@ const ResumeBuilder = () => {
                     {touched.phone && <FieldError msg={errors.phone} />}
                   </div>
                   <input value={resumeData.location} onChange={(e) => updateField("location", e.target.value)}
-                    placeholder="Location" className="input-field col-span-2" />
+                    placeholder="Location" className="input-field sm:col-span-2" />
                 </div>
               </div>
 
               {/* Social Links */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
                   <Link2 className="w-4 h-4 text-primary" /> Social Links
                 </h3>
@@ -419,7 +463,7 @@ const ResumeBuilder = () => {
               </div>
 
               {/* Summary */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4">Professional Summary</h3>
                 <textarea
                   value={resumeData.summary}
@@ -433,7 +477,7 @@ const ResumeBuilder = () => {
               </div>
 
               {/* Skills */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4">Skills</h3>
                 <div className="flex flex-wrap gap-2 mb-3">
                   {resumeData.skills.map((s) => (
@@ -452,7 +496,7 @@ const ResumeBuilder = () => {
               </div>
 
               {/* Experience */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4">Experience</h3>
                 {resumeData.experience.map((exp, i) => (
                   <div key={i} className="space-y-3 mb-4 pb-4 border-b border-border last:border-0">
@@ -462,10 +506,10 @@ const ResumeBuilder = () => {
                         <button onClick={() => removeExp(i)} className="text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></button>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <input value={exp.title} onChange={(e) => updateExp(i, "title", e.target.value)} placeholder="Job Title" className="input-field" />
                       <input value={exp.company} onChange={(e) => updateExp(i, "company", e.target.value)} placeholder="Company" className="input-field" />
-                      <input value={exp.duration} onChange={(e) => updateExp(i, "duration", e.target.value)} placeholder="e.g. Jan 2022 – Present" className="input-field col-span-2" />
+                      <input value={exp.duration} onChange={(e) => updateExp(i, "duration", e.target.value)} placeholder="e.g. Jan 2022 – Present" className="input-field sm:col-span-2" />
                     </div>
                     <textarea value={exp.description} onChange={(e) => updateExp(i, "description", e.target.value)}
                       placeholder="Key responsibilities & achievements..." className="input-field min-h-[60px] w-full" />
@@ -476,7 +520,7 @@ const ResumeBuilder = () => {
               </div>
 
               {/* Education */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4">Education</h3>
                 {resumeData.education.map((edu, i) => (
                   <div key={i} className="mb-3 last:mb-0">
@@ -486,7 +530,7 @@ const ResumeBuilder = () => {
                         <button onClick={() => removeEdu(i)} className="text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></button>
                       )}
                     </div>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <input value={edu.degree} onChange={(e) => updateEdu(i, "degree", e.target.value)} placeholder="Degree / Certification" className="input-field" />
                       <input value={edu.institution} onChange={(e) => updateEdu(i, "institution", e.target.value)} placeholder="Institution" className="input-field" />
                       <input value={edu.year} onChange={(e) => updateEdu(i, "year", e.target.value)} placeholder="Year / Range" className="input-field" />
@@ -498,7 +542,7 @@ const ResumeBuilder = () => {
               </div>
 
               {/* Achievements */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
                   <Trophy className="w-4 h-4 text-yellow-500" /> Achievements
                 </h3>
@@ -521,7 +565,7 @@ const ResumeBuilder = () => {
               </div>
 
               {/* Projects */}
-              <div className="card-elevated p-6">
+              <div className="card-elevated p-4 sm:p-6">
                 <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
                   <FolderKanban className="w-4 h-4 text-accent" /> Projects
                 </h3>
@@ -533,7 +577,7 @@ const ResumeBuilder = () => {
                         <button onClick={() => removeProject(i)} className="text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></button>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input value={proj.name} onChange={(e) => updateProject(i, "name", e.target.value)}
                         placeholder="Project Name" className="input-field" />
                       <input value={proj.tech} onChange={(e) => updateProject(i, "tech", e.target.value)}
@@ -556,7 +600,7 @@ const ResumeBuilder = () => {
 
             {/* ── Preview ── */}
             <div className="lg:sticky lg:top-20 lg:self-start">
-              <div className="card-elevated p-6 bg-card overflow-hidden">
+              <div className="card-elevated p-4 sm:p-6 bg-card overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Live Preview</span>
                   <span className="text-xs font-semibold text-primary capitalize">{selectedTemplate}</span>
