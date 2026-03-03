@@ -212,15 +212,37 @@ const ResumeBuilder = () => {
       toast({ title: "Please fix validation errors before downloading.", variant: "destructive" });
       return;
     }
+
     const html = generateResumeHTML(resumeData, selectedTemplate);
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${resumeData.fullName || "resume"}_${selectedTemplate}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast({ title: "Resume downloaded!" });
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) {
+      document.body.removeChild(iframe);
+      toast({ title: "Unable to open PDF print dialog", variant: "destructive" });
+      return;
+    }
+
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    iframe.onload = () => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+      }, 1500);
+    };
+
+    toast({ title: "Print dialog opened — choose Save as PDF." });
   };
 
   // Skills
@@ -336,7 +358,7 @@ const ResumeBuilder = () => {
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
               </button>
               <button onClick={handleDownload} className="btn-primary text-xs sm:text-sm py-2 px-3 sm:px-4 flex items-center gap-2">
-                <Download className="w-4 h-4" /> Download
+                <Download className="w-4 h-4" /> Download PDF
               </button>
             </div>
           </div>
