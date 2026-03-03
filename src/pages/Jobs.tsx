@@ -17,6 +17,26 @@ const Jobs = () => {
   useEffect(() => {
     fetchJobs();
     if (user) fetchSavedJobs();
+
+    const jobsChannel = supabase
+      .channel("jobs-live-feed")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "jobs" },
+        () => {
+          fetchJobs();
+        }
+      )
+      .subscribe();
+
+    const pollInterval = setInterval(() => {
+      fetchJobs();
+    }, 20000);
+
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(jobsChannel);
+    };
   }, [user]);
 
   const fetchJobs = async () => {

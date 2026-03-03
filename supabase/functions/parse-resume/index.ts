@@ -116,6 +116,36 @@ function extractFromContentStream(decoded: string): string[] {
 
 // ─── Main PDF text extractor ─────────────────────────────────────────────────
 
+function normalizeExtractedText(input: string): string {
+  return input
+    .replace(/\u0000/g, "")
+    .replace(/\r/g, "\n")
+    .replace(/\t/g, " ")
+    .replace(/ {2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+    .replace(/(\d)([a-zA-Z])/g, "$1 $2")
+    .trim();
+}
+
+function scoreTextQuality(text: string): number {
+  if (!text?.trim()) return 0;
+  const compact = text.replace(/\s/g, "");
+  if (!compact.length) return 0;
+
+  const letters = (compact.match(/[A-Za-z]/g) || []).length;
+  const digits = (compact.match(/\d/g) || []).length;
+  const symbols = (compact.match(/[^A-Za-z0-9]/g) || []).length;
+  const words = (text.match(/[A-Za-z]{2,}/g) || []).length;
+
+  const letterRatio = letters / compact.length;
+  const symbolRatio = symbols / compact.length;
+  const wordDensity = words / Math.max(text.length / 6, 1);
+
+  return (letterRatio * 55) + ((1 - symbolRatio) * 30) + (Math.min(wordDensity, 1) * 15) + Math.min(digits, 20) * 0.2;
+}
+
 async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
   const latin1 = new TextDecoder("latin1");
   const utf8 = new TextDecoder("utf-8", { fatal: false });
@@ -161,20 +191,12 @@ async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
     allChunks.push(...chunks);
   }
 
-  // Join with smart spacing - preserve newlines for structure
-  let text = allChunks
-    .join(" ")
-    .replace(/\n/g, "\n")
-    .replace(/ {2,}/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/([a-zA-Z])(\d)/g, "$1 $2")
-    .replace(/(\d)([a-zA-Z])/g, "$1 $2")
-    .trim();
+  let text = normalizeExtractedText(allChunks.join(" "));
 
   console.log(`Extracted text length: ${text.length}`);
   console.log(`Preview: ${text.substring(0, 800)}`);
 
-  // ── Fallback: if still short, use printable-run heuristic ────────────────
+  // Fallback: if short, use printable-run heuristic
   if (text.length < 300) {
     console.log("Short extraction, trying UTF-8 printable fallback...");
     const full = utf8.decode(bytes);
@@ -194,7 +216,38 @@ async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
     }
   }
 
-  return text;
+  return normalizeExtractedText(text);
+}
+
+async function extractTextWithPdfJs(bytes: Uint8Array): Promise<string> {
+  try {
+    const { getDocument } = await import("https://esm.sh/pdfjs-serverless");
+    const loadingTask = getDocument({
+      data: bytes,
+      useSystemFonts: true,
+    });
+
+    const pdf = await loadingTask.promise;
+    const pages: string[] = [];
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = (content.items as any[])
+        .map((item) => (typeof item?.str === "string" ? item.str : ""))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (pageText) pages.push(pageText);
+    }
+
+    const extracted = normalizeExtractedText(pages.join("\n"));
+    console.log(`pdfjs-serverless extracted length: ${extracted.length}`);
+    return extracted;
+  } catch (err) {
+    console.warn("pdf.js extraction fallback failed:", err);
+    return "";
+  }
 }
 
 // ─── DOCX text extractor (basic XML parsing) ────────────────────────────────
@@ -259,7 +312,21 @@ async function extractText(fileData: Blob, fileName: string): Promise<string> {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".pdf")) {
     const buf = await fileData.arrayBuffer();
-    return extractTextFromPdfBytes(new Uint8Array(buf));
+    const bytes = new Uint8Array(buf);
+
+    const streamText = await extractTextFromPdfBytes(bytes);
+    const streamScore = scoreTextQuality(streamText);
+
+    // pdf.js handles encoded fonts and complex object streams much better.
+    // Run this fallback when stream extraction quality is poor.
+    if (streamScore < 45 || streamText.length < 500) {
+      const pdfJsText = await extractTextWithPdfJs(bytes);
+      const pdfJsScore = scoreTextQuality(pdfJsText);
+      console.log("PDF extraction quality", { streamScore, pdfJsScore });
+      if (pdfJsScore > streamScore) return pdfJsText;
+    }
+
+    return streamText;
   }
   if (lower.endsWith(".docx")) {
     return extractTextFromDocx(fileData);
