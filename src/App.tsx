@@ -14,6 +14,7 @@ import Jobs from "./pages/Jobs";
 import Profile from "./pages/Profile";
 import ResumeBuilder from "./pages/ResumeBuilder";
 import RecruiterDashboard from "./pages/recruiter/RecruiterDashboard";
+import ResumeChatbot from "./pages/ResumeChatbot";
 import PostJob from "./pages/recruiter/PostJob";
 import Applicants from "./pages/recruiter/Applicants";
 import Chat from "./pages/Chat";
@@ -39,6 +40,7 @@ const App = () => (
             <Route path="/dashboard" element={<ProtectedRoute requiredRole="candidate"><Dashboard /></ProtectedRoute>} />
             <Route path="/jobs" element={<ProtectedRoute requiredRole="candidate"><Jobs /></ProtectedRoute>} />
             <Route path="/resume-builder" element={<ProtectedRoute requiredRole="candidate"><ResumeBuilder /></ProtectedRoute>} />
+            <Route path="/resume-chatbot" element={<ProtectedRoute requiredRole="candidate"><ResumeChatbot /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
 
             {/* Recruiter routes */}

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { FileText, LayoutDashboard, Briefcase, User, Menu, X, MessageSquare, PenTool, Users, LogIn } from "lucide-react";
+import { FileText, LayoutDashboard, Briefcase, User, Menu, X, MessageSquare, PenTool, Users, LogIn, Bot } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -14,6 +14,7 @@ const Header = () => {
     { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { path: "/jobs", label: "Jobs", icon: Briefcase },
     { path: "/resume-builder", label: "Resume Builder", icon: PenTool },
+    { path: "/resume-chatbot", label: "AI Resume", icon: Bot },
     { path: "/messages", label: "Messages", icon: MessageSquare },
     { path: "/profile", label: "Profile", icon: User },
   ];

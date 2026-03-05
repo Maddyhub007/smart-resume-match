@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.fetch-external-jobs]
 verify_jwt = false
+
+[functions.resume-chatbot]
+verify_jwt = false
