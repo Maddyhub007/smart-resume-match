@@ -23,6 +23,7 @@ interface ExternalJob {
   source: string;
   postedAt: string;
   salary?: string;
+  matchScore?: number;
 }
 
 const Jobs = () => {
@@ -112,11 +113,37 @@ const Jobs = () => {
     }
   };
 
-  // External jobs
+  // Calculate match score for external jobs based on user's resume skills
+  const calculateExternalMatchScores = (externalJobs: ExternalJob[], candidateSkills: string[]): ExternalJob[] => {
+    if (candidateSkills.length === 0) return externalJobs;
+    return externalJobs.map((job) => {
+      const jobSkills = job.skills.map((s) => s.toLowerCase());
+      const jobText = `${job.title} ${job.description}`.toLowerCase();
+      if (jobSkills.length === 0) {
+        // Fallback: match against title/description keywords
+        const keywordMatches = candidateSkills.filter((s) => jobText.includes(s)).length;
+        const score = Math.min(Math.round((keywordMatches / Math.max(candidateSkills.length, 1)) * 100), 100);
+        return { ...job, matchScore: Math.max(score, 5) };
+      }
+      const matchCount = jobSkills.filter((s) => candidateSkills.includes(s) || candidateSkills.some((cs) => s.includes(cs) || cs.includes(s))).length;
+      const score = Math.round((matchCount / jobSkills.length) * 100);
+      return { ...job, matchScore: Math.max(score, 5) };
+    });
+  };
+
   const fetchExternalJobs = useCallback(async (page = 1) => {
     setExternalLoading(true);
     setHasSearched(true);
     try {
+      // Get user's resume skills for matching
+      let candidateSkills: string[] = [];
+      if (user) {
+        const { data: resume } = await supabase
+          .from("resumes").select("parsed_skills").eq("user_id", user.id).eq("is_active", true)
+          .order("created_at", { ascending: false }).limit(1).maybeSingle();
+        candidateSkills = (resume?.parsed_skills || []).map((s: string) => s.toLowerCase());
+      }
+
       const { data, error } = await supabase.functions.invoke("fetch-external-jobs", {
         body: {
           keyword: externalKeyword || undefined,
@@ -127,7 +154,12 @@ const Jobs = () => {
         },
       });
       if (error) throw error;
-      setExternalJobs(data.jobs || []);
+
+      let fetchedJobs = data.jobs || [];
+      fetchedJobs = calculateExternalMatchScores(fetchedJobs, candidateSkills);
+      fetchedJobs.sort((a: ExternalJob, b: ExternalJob) => (b.matchScore || 0) - (a.matchScore || 0));
+
+      setExternalJobs(fetchedJobs);
       setExternalPagination(data.pagination || { total: 0, totalPages: 1 });
       setExternalPage(page);
     } catch (e) {
@@ -135,7 +167,7 @@ const Jobs = () => {
       toast({ title: "Failed to fetch external jobs", variant: "destructive" });
     }
     setExternalLoading(false);
-  }, [externalKeyword, filters.location, filters.experience]);
+  }, [externalKeyword, filters.location, filters.experience, user]);
 
   useEffect(() => {
     if (activeTab === "external" && !hasSearched) {

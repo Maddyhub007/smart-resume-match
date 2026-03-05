@@ -1,5 +1,6 @@
 import { MapPin, Building2, ExternalLink, Clock, Globe } from "lucide-react";
 import SkillTag from "./SkillTag";
+import MatchScoreRing from "./MatchScoreRing";
 
 interface ExternalJob {
   id: string;
@@ -14,6 +15,7 @@ interface ExternalJob {
   source: string;
   postedAt: string;
   salary?: string;
+  matchScore?: number;
 }
 
 const ExternalJobCard = ({ job }: { job: ExternalJob }) => {
@@ -36,13 +38,18 @@ const ExternalJobCard = ({ job }: { job: ExternalJob }) => {
 
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h3 className="font-semibold text-base sm:text-lg text-foreground truncate">{job.title}</h3>
               <p className="text-muted-foreground font-medium text-sm">{job.company}</p>
             </div>
-            <span className="text-xs px-2 py-1 rounded-full bg-accent text-accent-foreground whitespace-nowrap flex-shrink-0">
-              {job.source}
-            </span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {job.matchScore !== undefined && job.matchScore > 0 && (
+                <MatchScoreRing score={job.matchScore} size="sm" />
+              )}
+              <span className="text-xs px-2 py-1 rounded-full bg-accent text-accent-foreground whitespace-nowrap">
+                {job.source}
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs sm:text-sm text-muted-foreground">
