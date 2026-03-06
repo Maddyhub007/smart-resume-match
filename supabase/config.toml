@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.resume-chatbot]
 verify_jwt = false
+
+[functions.optimize-resume]
+verify_jwt = false

@@ -12,7 +12,7 @@ interface Message {
   content: string;
 }
 
-const STEPS_ORDER = ["greeting", "email", "phone", "location", "summary", "experience", "education", "skills", "complete"];
+const STEPS_ORDER = ["greeting", "email", "phone", "location", "summary", "experience", "education", "skills", "projects", "complete"];
 
 const ResumeChatbot = () => {
   const { user } = useAuth();
@@ -25,6 +25,7 @@ const ResumeChatbot = () => {
   const [currentStep, setCurrentStep] = useState("greeting");
   const [collectedData, setCollectedData] = useState<Record<string, any>>({});
   const [resumeGenerated, setResumeGenerated] = useState(false);
+  const [generatedResumeId, setGeneratedResumeId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -40,7 +41,6 @@ const ResumeChatbot = () => {
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
     setLoading(true);
 
-    // Collect the data based on current step
     const newData = { ...collectedData };
     switch (currentStep) {
       case "greeting": newData.fullName = userMessage; break;
@@ -51,15 +51,10 @@ const ResumeChatbot = () => {
       case "experience":
         if (userMessage.toLowerCase() !== "done") {
           newData.experience = (newData.experience || "") + "\n" + userMessage;
-          // Stay on experience step
           setCollectedData(newData);
           try {
             const { data, error } = await supabase.functions.invoke("resume-chatbot", {
-              body: {
-                messages: [...messages, { role: "user", content: userMessage }].map((m) => ({ role: m.role, content: m.content })),
-                currentStep: "experience",
-                collectedData: newData,
-              },
+              body: { messages: [...messages, { role: "user", content: userMessage }].map((m) => ({ role: m.role, content: m.content })), currentStep: "experience", collectedData: newData },
             });
             if (error) throw error;
             setMessages((prev) => [...prev, { role: "assistant", content: data.message || "Great experience! Add another role or type **'done'** to continue." }]);
@@ -76,11 +71,7 @@ const ResumeChatbot = () => {
           setCollectedData(newData);
           try {
             const { data, error } = await supabase.functions.invoke("resume-chatbot", {
-              body: {
-                messages: [...messages, { role: "user", content: userMessage }].map((m) => ({ role: m.role, content: m.content })),
-                currentStep: "education",
-                collectedData: newData,
-              },
+              body: { messages: [...messages, { role: "user", content: userMessage }].map((m) => ({ role: m.role, content: m.content })), currentStep: "education", collectedData: newData },
             });
             if (error) throw error;
             setMessages((prev) => [...prev, { role: "assistant", content: data.message || "Got it! Add another or type **'done'**." }]);
@@ -92,20 +83,26 @@ const ResumeChatbot = () => {
         }
         break;
       case "skills": newData.skills = userMessage; break;
+      case "projects":
+        if (userMessage.toLowerCase() !== "done" && userMessage.toLowerCase() !== "skip") {
+          newData.projects = (newData.projects || "") + "\n" + userMessage;
+          setCollectedData(newData);
+          setMessages((prev) => [...prev, { role: "assistant", content: "Got it! Add another project or type **'done'** to finish." }]);
+          setLoading(false);
+          return;
+        }
+        break;
     }
 
     setCollectedData(newData);
 
-    // Determine next step
     const currentIndex = STEPS_ORDER.indexOf(currentStep);
     let nextStep = STEPS_ORDER[currentIndex + 1];
-    // Handle "done" for experience/education
-    if ((currentStep === "experience" || currentStep === "education") && userMessage.toLowerCase() === "done") {
+    if ((currentStep === "experience" || currentStep === "education" || currentStep === "projects") && (userMessage.toLowerCase() === "done" || userMessage.toLowerCase() === "skip")) {
       nextStep = STEPS_ORDER[currentIndex + 1];
     }
 
     if (nextStep === "complete") {
-      // Generate the resume
       setMessages((prev) => [...prev, { role: "assistant", content: "✨ Perfect! I have all your information. Let me craft your professional resume..." }]);
       setCurrentStep("complete");
 
@@ -116,19 +113,53 @@ const ResumeChatbot = () => {
         if (error) throw error;
 
         if (data.type === "resume_complete" && data.resumeData) {
-          // Save to user_resumes
+          let savedId: string | null = null;
           if (user) {
+            // Normalize the resume data to match ResumeBuilder format
+            const normalizedData = {
+              fullName: data.resumeData.personalInfo?.fullName || newData.fullName || "",
+              email: data.resumeData.personalInfo?.email || newData.email || "",
+              phone: data.resumeData.personalInfo?.phone || newData.phone || "",
+              location: data.resumeData.personalInfo?.location || newData.location || "",
+              summary: data.resumeData.summary || "",
+              skills: data.resumeData.skills || [],
+              socialLinks: [{ platform: "LinkedIn", url: "" }],
+              experience: (data.resumeData.experience || []).map((e: any) => ({
+                title: e.title || "",
+                company: e.company || "",
+                duration: e.startDate && e.endDate ? `${e.startDate} - ${e.endDate}` : e.duration || "",
+                description: e.description || "",
+              })),
+              education: (data.resumeData.education || []).map((e: any) => ({
+                degree: e.degree || "",
+                institution: e.institution || "",
+                year: e.year || "",
+              })),
+              achievements: [{ title: "", description: "" }],
+              projects: data.resumeData.projects?.length
+                ? data.resumeData.projects.map((p: any) => ({
+                    name: p.name || p.title || "",
+                    description: p.description || "",
+                    tech: p.tech || p.technologies || "",
+                    url: p.url || "",
+                  }))
+                : [{ name: "", description: "", tech: "", url: "" }],
+              templateStyle: "modern",
+            };
+
             const resumePayload = {
               user_id: user.id,
               title: `AI Resume - ${newData.fullName || "Untitled"}`,
-              resume_data: data.resumeData,
+              resume_data: normalizedData as unknown as import("@/integrations/supabase/types").Json,
             };
-            await supabase.from("user_resumes").insert(resumePayload);
+            const { data: savedResume } = await supabase.from("user_resumes").insert(resumePayload).select("id").single();
+            savedId = savedResume?.id || null;
           }
 
+          setGeneratedResumeId(savedId);
           setMessages((prev) => [
-            ...prev.slice(0, -1), // Remove the "crafting" message
-            { role: "assistant", content: data.message },
+            ...prev.slice(0, -1),
+            { role: "assistant", content: data.message + "\n\nClick **Edit in Resume Builder** to customize your resume, change templates, and download as PDF." },
           ]);
           setResumeGenerated(true);
         }
@@ -154,7 +185,6 @@ const ResumeChatbot = () => {
       if (error) throw error;
       setMessages((prev) => [...prev, { role: "assistant", content: data.message }]);
     } catch {
-      // Fallback scripted responses
       const fallbacks: Record<string, string> = {
         email: "What's your **email address**?",
         phone: "What's your **phone number**?",
@@ -163,6 +193,7 @@ const ResumeChatbot = () => {
         experience: "Let's add your **work experience**. Describe your roles and type **'done'** when finished.",
         education: "Now your **education**. Share your degrees and type **'done'** when finished.",
         skills: "List your **key skills** separated by commas.",
+        projects: "Do you have any **projects** to showcase? Describe them in the format:\n\n**Project Name** - Description (Tech stack)\n\nType **'done'** when finished or **'skip'** to skip.",
       };
       setMessages((prev) => [...prev, { role: "assistant", content: `Got it! ${fallbacks[nextStep] || ""}` }]);
     }
@@ -187,12 +218,8 @@ const ResumeChatbot = () => {
                 <p className="text-xs text-muted-foreground">Guided conversation to build your perfect resume</p>
               </div>
             </div>
-            {/* Progress bar */}
             <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-500"
-                style={{ width: `${progressPercent}%` }}
-              />
+              <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${progressPercent}%` }} />
             </div>
             <p className="text-xs text-muted-foreground mt-1">{progressPercent}% complete</p>
           </div>
@@ -206,11 +233,7 @@ const ResumeChatbot = () => {
                     <Sparkles className="w-4 h-4 text-primary" />
                   </div>
                 )}
-                <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-foreground"
-                }`}>
+                <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"}`}>
                   <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&>p]:m-0">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   </div>
@@ -239,11 +262,11 @@ const ResumeChatbot = () => {
           {resumeGenerated ? (
             <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-border">
               <button
-                onClick={() => navigate("/resume-builder")}
+                onClick={() => navigate("/resume-builder", { state: { loadResumeId: generatedResumeId } })}
                 className="btn-primary py-3 px-6 flex items-center justify-center gap-2 flex-1"
               >
                 <FileText className="w-5 h-5" />
-                Open in Resume Builder
+                Edit in Resume Builder
               </button>
               <button
                 onClick={() => {
@@ -251,6 +274,7 @@ const ResumeChatbot = () => {
                   setCurrentStep("greeting");
                   setCollectedData({});
                   setResumeGenerated(false);
+                  setGeneratedResumeId(null);
                 }}
                 className="btn-secondary py-3 px-6 flex items-center justify-center gap-2"
               >
@@ -264,15 +288,15 @@ const ResumeChatbot = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
-                placeholder={currentStep === "experience" || currentStep === "education" ? "Type your answer or 'done' to continue..." : "Type your answer..."}
+                placeholder={
+                  currentStep === "experience" || currentStep === "education" || currentStep === "projects"
+                    ? "Type your answer or 'done' to continue..."
+                    : "Type your answer..."
+                }
                 className="input-field flex-1"
                 disabled={loading}
               />
-              <button
-                onClick={handleSend}
-                disabled={loading || !input.trim()}
-                className="btn-primary py-3 px-4"
-              >
+              <button onClick={handleSend} disabled={loading || !input.trim()} className="btn-primary py-3 px-4">
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
               </button>
             </div>
