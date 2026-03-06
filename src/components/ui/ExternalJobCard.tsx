@@ -18,7 +18,7 @@ interface ExternalJob {
   matchScore?: number;
 }
 
-const ExternalJobCard = ({ job }: { job: ExternalJob }) => {
+const ExternalJobCard = ({ job, onOptimize }: { job: ExternalJob; onOptimize?: () => void }) => {
   const timeAgo = (dateStr: string) => {
     const diff = Date.now() - new Date(dateStr).getTime();
     const days = Math.floor(diff / 86400000);
