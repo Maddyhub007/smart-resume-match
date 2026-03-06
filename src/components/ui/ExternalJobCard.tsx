@@ -1,4 +1,4 @@
-import { MapPin, Building2, ExternalLink, Clock, Globe } from "lucide-react";
+import { MapPin, Building2, ExternalLink, Clock, Globe, Sparkles } from "lucide-react";
 import SkillTag from "./SkillTag";
 import MatchScoreRing from "./MatchScoreRing";
 
@@ -83,7 +83,7 @@ const ExternalJobCard = ({ job, onOptimize }: { job: ExternalJob; onOptimize?: (
             )}
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 flex items-center gap-3">
             <a
               href={job.url}
               target="_blank"
@@ -94,6 +94,11 @@ const ExternalJobCard = ({ job, onOptimize }: { job: ExternalJob; onOptimize?: (
               View & Apply
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
+            {onOptimize && (
+              <button onClick={onOptimize} className="btn-secondary text-sm py-2 px-4 inline-flex items-center gap-2">
+                <Sparkles className="w-4 h-4" /> Optimize Resume
+              </button>
+            )}
           </div>
         </div>
       </div>
