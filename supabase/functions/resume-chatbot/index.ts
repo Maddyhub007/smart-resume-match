@@ -14,6 +14,7 @@ const STEPS = [
   { key: "experience", question: "Let's add your **work experience**. Please describe your most recent role in this format:\n\n**Job Title** at **Company** (Start Date - End Date)\n- Key responsibility or achievement\n- Another achievement\n\nYou can add multiple roles. Type **'done'** when you've listed all your experience." },
   { key: "education", question: "Now let's add your **education**. Please share:\n\n**Degree** from **University** (Year)\n\nType **'done'** when finished." },
   { key: "skills", question: "List your **key skills** separated by commas (e.g. JavaScript, React, Project Management, Data Analysis)." },
+  { key: "projects", question: "Do you have any **projects** to showcase? Describe them:\n\n**Project Name** - What it does (Tech stack)\n\nType **'done'** when finished or **'skip'** to skip." },
   { key: "complete", question: "" },
 ];
 
