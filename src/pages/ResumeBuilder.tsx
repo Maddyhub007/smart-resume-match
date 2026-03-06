@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { PenTool, Download, Save, Plus, Trash2, Loader2, Link2, Trophy, FolderKanban, AlertCircle, Upload } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { PenTool, Download, Save, Plus, Trash2, Loader2, Link2, Trophy, FolderKanban, AlertCircle, Upload, Sparkles, Briefcase, X, Check } from "lucide-react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,6 +19,14 @@ interface ResumeData {
   education: { degree: string; institution: string; year: string }[];
   achievements: Achievement[];
   projects: Project[];
+}
+
+interface OptimizationResult {
+  missingSkills: string[];
+  improvements: { section: string; suggestion: string }[];
+  optimizedSummary: string;
+  optimizedSkills: string[];
+  matchScore: number;
 }
 
 const emptyResume: ResumeData = {
@@ -101,6 +109,7 @@ const BUILT_IN_TEMPLATES = [
 const ResumeBuilder = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("modern");
   const [userResumes, setUserResumes] = useState<any[]>([]);
@@ -112,7 +121,40 @@ const ResumeBuilder = () => {
   const [errors, setErrors] = useState<Errors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
+  // Job optimization state
+  const [showOptimizer, setShowOptimizer] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizationResult, setOptimizationResult] = useState<OptimizationResult | null>(null);
+  const [optimizeJobTitle, setOptimizeJobTitle] = useState("");
+  const [optimizeJobDesc, setOptimizeJobDesc] = useState("");
+  const [optimizeJobSkills, setOptimizeJobSkills] = useState("");
+
   useEffect(() => { fetchData(); }, [user]);
+
+  // Load chatbot-generated resume via navigation state
+  useEffect(() => {
+    const state = location.state as { loadResumeId?: string; optimizeForJob?: any } | null;
+    if (state?.loadResumeId) {
+      loadResumeById(state.loadResumeId);
+      // Clear state to prevent re-loading on re-render
+      window.history.replaceState({}, document.title);
+    }
+    if (state?.optimizeForJob) {
+      setOptimizeJobTitle(state.optimizeForJob.title || "");
+      setOptimizeJobDesc(state.optimizeForJob.description || "");
+      setOptimizeJobSkills((state.optimizeForJob.skills || []).join(", "));
+      setShowOptimizer(true);
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
+  const loadResumeById = async (id: string) => {
+    const { data: resume } = await supabase.from("user_resumes").select("*").eq("id", id).single();
+    if (resume) {
+      loadUserResume(resume);
+      toast({ title: "Resume loaded from AI chatbot! ✅ Edit and customize below." });
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -182,7 +224,6 @@ const ResumeBuilder = () => {
   const handleSave = async () => {
     const newErrors = validateResume(resumeData);
     setErrors(newErrors);
-    // Mark all as touched
     setTouched(Object.fromEntries(Object.keys(newErrors).map((k) => [k, true])));
     if (Object.keys(newErrors).length > 0) {
       toast({ title: "Please fix validation errors before saving.", variant: "destructive" });
@@ -245,6 +286,59 @@ const ResumeBuilder = () => {
     toast({ title: "Print dialog opened — choose Save as PDF." });
   };
 
+  // Optimization
+  const handleOptimize = async () => {
+    if (!optimizeJobTitle.trim() && !optimizeJobDesc.trim()) {
+      toast({ title: "Please enter a job title or description to optimize against.", variant: "destructive" });
+      return;
+    }
+    setOptimizing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("optimize-resume", {
+        body: {
+          resumeData,
+          jobTitle: optimizeJobTitle,
+          jobDescription: optimizeJobDesc,
+          jobSkills: optimizeJobSkills.split(",").map((s) => s.trim()).filter(Boolean),
+        },
+      });
+      if (error) throw error;
+      setOptimizationResult(data);
+      toast({ title: "Optimization analysis complete! ✨" });
+    } catch (e: any) {
+      toast({ title: "Optimization failed", description: e.message, variant: "destructive" });
+    }
+    setOptimizing(false);
+  };
+
+  const applyOptimization = async () => {
+    if (!optimizationResult) return;
+    updateField("summary", optimizationResult.optimizedSummary);
+    updateField("skills", optimizationResult.optimizedSkills);
+    setOptimizationResult(null);
+    toast({ title: "Optimization applied! Review and save your resume." });
+  };
+
+  const saveAsJobSpecific = async () => {
+    if (!optimizationResult || !user) return;
+    const optimized = {
+      ...resumeData,
+      summary: optimizationResult.optimizedSummary,
+      skills: optimizationResult.optimizedSkills,
+      templateStyle: selectedTemplate,
+    };
+    const { data } = await supabase.from("user_resumes").insert({
+      user_id: user.id,
+      title: `${resumeData.fullName || "Untitled"} - Optimized for ${optimizeJobTitle}`,
+      resume_data: optimized as unknown as import("@/integrations/supabase/types").Json,
+    }).select().single();
+    if (data) {
+      toast({ title: `Job-specific resume saved! ✅` });
+      setOptimizationResult(null);
+      fetchData();
+    }
+  };
+
   // Skills
   const addSkill = () => {
     if (newSkill.trim() && !resumeData.skills.includes(newSkill.trim())) {
@@ -285,7 +379,7 @@ const ResumeBuilder = () => {
   };
   const removeProject = (i: number) => updateField("projects", resumeData.projects.filter((_, idx) => idx !== i));
 
-  // ─── Import from uploaded resume ─────────────────────────────────────────
+  // Import from uploaded resume
   const [importing, setImporting] = useState(false);
 
   const handleImportResume = useCallback(async () => {
@@ -351,6 +445,9 @@ const ResumeBuilder = () => {
                   <AlertCircle className="w-3.5 h-3.5" /> {errorCount} error{errorCount > 1 ? "s" : ""}
                 </span>
               )}
+              <button onClick={() => setShowOptimizer(!showOptimizer)} className="btn-secondary text-xs sm:text-sm py-2 px-3 sm:px-4 flex items-center gap-2">
+                <Sparkles className="w-4 h-4" /> Optimize for Job
+              </button>
               <button onClick={handleImportResume} disabled={importing} className="btn-secondary text-xs sm:text-sm py-2 px-3 sm:px-4 flex items-center gap-2">
                 {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Import Resume
               </button>
@@ -362,6 +459,75 @@ const ResumeBuilder = () => {
               </button>
             </div>
           </div>
+
+          {/* Job Optimization Panel */}
+          {showOptimizer && (
+            <div className="card-elevated p-4 sm:p-6 mb-6 border-primary/20">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-foreground flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-primary" /> Optimize Resume for a Job
+                </h3>
+                <button onClick={() => { setShowOptimizer(false); setOptimizationResult(null); }} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <input value={optimizeJobTitle} onChange={(e) => setOptimizeJobTitle(e.target.value)}
+                  placeholder="Job Title (e.g. Senior React Developer)" className="input-field" />
+                <input value={optimizeJobSkills} onChange={(e) => setOptimizeJobSkills(e.target.value)}
+                  placeholder="Required Skills (comma separated)" className="input-field" />
+              </div>
+              <textarea value={optimizeJobDesc} onChange={(e) => setOptimizeJobDesc(e.target.value)}
+                placeholder="Paste the job description here..." className="input-field min-h-[80px] w-full mb-4" />
+              <button onClick={handleOptimize} disabled={optimizing} className="btn-primary text-sm py-2 px-4 flex items-center gap-2">
+                {optimizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {optimizing ? "Analyzing..." : "Analyze & Optimize"}
+              </button>
+
+              {/* Optimization Results */}
+              {optimizationResult && (
+                <div className="mt-6 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-foreground">Estimated Match Score:</span>
+                    <span className="text-lg font-bold text-primary">{optimizationResult.matchScore}%</span>
+                  </div>
+
+                  {optimizationResult.missingSkills.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-foreground mb-2">⚠️ Missing Skills</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {optimizationResult.missingSkills.map((skill) => (
+                          <span key={skill} className="text-xs px-2 py-1 rounded-full bg-destructive/10 text-destructive font-medium">{skill}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {optimizationResult.improvements.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-foreground mb-2">💡 Suggestions</h4>
+                      <ul className="space-y-2">
+                        {optimizationResult.improvements.map((imp, i) => (
+                          <li key={i} className="text-sm text-muted-foreground bg-muted/50 rounded-lg p-3">
+                            <span className="font-medium text-foreground">{imp.section}:</span> {imp.suggestion}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-3 pt-2">
+                    <button onClick={applyOptimization} className="btn-primary text-sm py-2 px-4 flex items-center gap-2">
+                      <Check className="w-4 h-4" /> Apply Changes to Current Resume
+                    </button>
+                    <button onClick={saveAsJobSpecific} className="btn-secondary text-sm py-2 px-4 flex items-center gap-2">
+                      <Save className="w-4 h-4" /> Save as Job-Specific Resume
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Saved resumes */}
           {userResumes.length > 0 && (
@@ -389,7 +555,6 @@ const ResumeBuilder = () => {
               {BUILT_IN_TEMPLATES.map((t) => (
                 <button key={t.id} onClick={() => setSelectedTemplate(t.id)}
                   className={`card-elevated p-4 text-center transition-all hover:scale-105 ${selectedTemplate === t.id ? "border-primary ring-2 ring-primary/25" : ""}`}>
-                  {/* Mini preview swatch */}
                   <div className="w-full h-10 rounded-lg mb-2 flex flex-col gap-1 p-1.5 overflow-hidden"
                     style={{ background: t.id === "executive" ? "#0f172a" : t.id === "vibrant" ? "linear-gradient(135deg,#7c3aed,#6366f1)" : "#f8fafc", border: `2px solid ${t.accent}` }}>
                     <div className="w-full h-1.5 rounded-full" style={{ background: t.accent, opacity: 0.9 }} />
