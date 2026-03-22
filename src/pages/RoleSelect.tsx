@@ -1,21 +1,32 @@
 import { useNavigate } from "react-router-dom";
-import { User, Briefcase, ArrowRight } from "lucide-react";
+import { User, Briefcase, ArrowRight, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const RoleSelect = () => {
   const navigate = useNavigate();
-  const { user, role, setUserRole } = useAuth();
+  const { user, role, loading: authLoading, setUserRole } = useAuth();
   const [loading, setLoading] = useState(false);
 
-  if (!user) {
-    navigate("/auth");
-    return null;
-  }
-  if (role) {
-    navigate(role === "recruiter" ? "/recruiter" : "/dashboard");
-    return null;
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      navigate("/auth", { replace: true });
+      return;
+    }
+    if (role) {
+      navigate(role === "recruiter" ? "/recruiter" : "/dashboard", { replace: true });
+    }
+  }, [user, role, authLoading, navigate]);
+
+  // Show loading while auth state is resolving to prevent flash
+  if (authLoading || !user || role) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
   }
 
   const handleSelect = async (selectedRole: "candidate" | "recruiter") => {
@@ -23,7 +34,7 @@ const RoleSelect = () => {
     try {
       await setUserRole(selectedRole);
       toast({ title: `Welcome as a ${selectedRole}!` });
-      navigate(selectedRole === "recruiter" ? "/recruiter" : "/upload");
+      navigate(selectedRole === "recruiter" ? "/recruiter" : "/upload", { replace: true });
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
