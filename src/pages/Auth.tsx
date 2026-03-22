@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FileText, Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,16 +6,21 @@ import { toast } from "@/hooks/use-toast";
 
 const Auth = () => {
   const navigate = useNavigate();
-  const { signIn, signUp, user, role } = useAuth();
+  const { signIn, signUp, user, role, loading: authLoading } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ email: "", password: "", fullName: "" });
 
-  if (user && role) {
-    navigate(role === "recruiter" ? "/recruiter" : "/dashboard");
-    return null;
-  }
+  // Redirect when auth state changes
+  useEffect(() => {
+    if (authLoading) return;
+    if (user && role) {
+      navigate(role === "recruiter" ? "/recruiter" : "/dashboard", { replace: true });
+    } else if (user && !role) {
+      navigate("/role-select", { replace: true });
+    }
+  }, [user, role, authLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
