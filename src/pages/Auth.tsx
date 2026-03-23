@@ -10,6 +10,7 @@ const Auth = () => {
   const { signIn, signUp, user, role, loading: authLoading } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ email: "", password: "", fullName: "" });
 
