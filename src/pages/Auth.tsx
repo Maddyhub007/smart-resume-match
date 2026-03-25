@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { FileText, Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { lovable } from "@/integrations/lovable/index";
 
 const Auth = () => {
   const navigate = useNavigate();
