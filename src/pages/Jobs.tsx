@@ -415,29 +415,21 @@ const Jobs = () => {
                   )}
                   {filteredInternalJobs.map((job, i) => (
                     <div key={job.id} className="opacity-0 animate-fade-in-up" style={{ animationDelay: `${i * 60}ms`, animationFillMode: "forwards" }}>
-                      <div className="relative">
-                        <JobCard
-                          job={{
-                            id: job.id,
-                            title: job.title,
-                            company: job.company,
-                            location: job.location || "Remote",
-                            matchScore: job.matchScore,
-                            skills: job.skills_required || [],
-                            experience: job.experience_level || "Not specified",
-                            saved: savedJobIds.has(job.id),
-                          }}
-                          onSave={handleSave}
-                          onApply={handleApply}
-                        />
-                        <button
-                          onClick={() => handleOptimizeForJob(job)}
-                          className="absolute top-4 right-20 text-xs px-2 py-1 rounded-lg bg-accent text-accent-foreground hover:bg-accent/80 flex items-center gap-1 transition-colors"
-                          title="Optimize resume for this job"
-                        >
-                          <Sparkles className="w-3 h-3" /> Optimize
-                        </button>
-                      </div>
+                      <JobCard
+                        job={{
+                          id: job.id,
+                          title: job.title,
+                          company: job.company,
+                          location: job.location || "Remote",
+                          matchScore: job.matchScore,
+                          skills: job.skills_required || [],
+                          experience: job.experience_level || "Not specified",
+                          saved: savedJobIds.has(job.id),
+                        }}
+                        onSave={handleSave}
+                        onApply={handleApply}
+                        onOptimize={() => handleOptimizeForJob(job)}
+                      />
                     </div>
                   ))}
                 </>
