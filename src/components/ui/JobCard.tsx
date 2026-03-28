@@ -1,4 +1,4 @@
-import { MapPin, Building2, Bookmark, ExternalLink } from "lucide-react";
+import { MapPin, Building2, Bookmark, ExternalLink, Sparkles } from "lucide-react";
 import SkillTag from "./SkillTag";
 import MatchScoreRing from "./MatchScoreRing";
 
@@ -17,9 +17,10 @@ interface JobCardProps {
   job: Job;
   onSave?: (id: string) => void;
   onApply?: (id: string) => void;
+  onOptimize?: (id: string) => void;
 }
 
-const JobCard = ({ job, onSave, onApply }: JobCardProps) => {
+const JobCard = ({ job, onSave, onApply, onOptimize }: JobCardProps) => {
   return (
     <div className="card-elevated p-6">
       <div className="flex items-start gap-4">
@@ -76,6 +77,14 @@ const JobCard = ({ job, onSave, onApply }: JobCardProps) => {
             >
               <Bookmark className={`w-5 h-5 ${job.saved ? "fill-current" : ""}`} />
             </button>
+            {onOptimize && (
+              <button
+                onClick={() => onOptimize(job.id)}
+                className="btn-secondary text-sm py-2 px-4 flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" /> Optimize Resume
+              </button>
+            )}
           </div>
         </div>
       </div>
