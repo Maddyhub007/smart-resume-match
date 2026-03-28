@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bot, Send, Loader2, FileText, Sparkles, User, Download, FileType, RotateCcw } from "lucide-react";
+import { Bot, Send, Loader2, FileText, Sparkles, User, Download, FileType, RotateCcw, Plus, MessageSquare, Trash2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import Layout from "@/components/layout/Layout";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,6 +11,15 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   quickOptions?: string[];
+}
+
+interface ChatSession {
+  id: string;
+  title: string;
+  created_at: string;
+  current_step: string;
+  resume_generated: boolean;
+  generated_resume_id: string | null;
 }
 
 const STEPS_ORDER = ["greeting", "email", "phone", "location", "summary", "experience", "education", "skills", "projects", "complete"];
@@ -36,7 +45,6 @@ const QUICK_OPTIONS: Record<string, string[]> = {
   projects: ["skip", "done"],
 };
 
-// Resume HTML generator (shared with ResumeBuilder)
 function generateResumeHTML(data: any) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${data.fullName || "Resume"}</title>
   <style>
@@ -83,13 +91,118 @@ const ResumeChatbot = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Session management
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Load sessions on mount
+  useEffect(() => {
+    if (user) loadSessions();
+  }, [user]);
+
+  const loadSessions = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("chatbot_sessions")
+      .select("id, title, created_at, current_step, resume_generated, generated_resume_id")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+    setSessions((data as ChatSession[]) || []);
+    setSessionsLoaded(true);
+  };
+
+  const saveSession = useCallback(async (
+    msgs: Message[],
+    step: string,
+    data: Record<string, any>,
+    generated: boolean,
+    resumeId: string | null,
+    sessionId: string | null
+  ) => {
+    if (!user) return null;
+    const title = data.fullName ? `Resume - ${data.fullName}` : "New Chat";
+    const payload = {
+      user_id: user.id,
+      title,
+      messages: msgs.map(m => ({ role: m.role, content: m.content, quickOptions: m.quickOptions })) as any,
+      collected_data: data as any,
+      current_step: step,
+      resume_generated: generated,
+      generated_resume_id: resumeId,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (sessionId) {
+      await supabase.from("chatbot_sessions").update(payload).eq("id", sessionId);
+      return sessionId;
+    } else {
+      const { data: inserted } = await supabase.from("chatbot_sessions").insert(payload).select("id").single();
+      const newId = inserted?.id || null;
+      if (newId) {
+        setActiveSessionId(newId);
+        loadSessions();
+      }
+      return newId;
+    }
+  }, [user]);
+
+  const loadSession = async (session: ChatSession) => {
+    const { data } = await supabase
+      .from("chatbot_sessions")
+      .select("messages, collected_data, current_step, resume_generated, generated_resume_id")
+      .eq("id", session.id)
+      .single();
+    if (!data) return;
+
+    const msgs = (data.messages as any[]).map((m: any) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+      quickOptions: m.quickOptions,
+    }));
+    setMessages(msgs);
+    setCollectedData(data.collected_data as Record<string, any>);
+    setCurrentStep(data.current_step);
+    setResumeGenerated(data.resume_generated);
+    setGeneratedResumeId(data.generated_resume_id);
+    setActiveSessionId(session.id);
+    setShowSidebar(false);
+
+    // If resume was generated, reconstruct finalResumeData from collected_data
+    if (data.resume_generated && data.collected_data) {
+      setFinalResumeData(data.collected_data);
+    }
+  };
+
+  const deleteSession = async (sessionId: string) => {
+    await supabase.from("chatbot_sessions").delete().eq("id", sessionId);
+    if (activeSessionId === sessionId) {
+      startNewChat();
+    }
+    loadSessions();
+  };
+
+  const startNewChat = () => {
+    setMessages([{
+      role: "assistant",
+      content: "Hi! 👋 I'm your **AI Resume Assistant**. I'll help you build a professional, ATS-optimized resume through a simple conversation.\n\nLet's start — what's your **full name**?",
+    }]);
+    setCurrentStep("greeting");
+    setCollectedData({});
+    setResumeGenerated(false);
+    setGeneratedResumeId(null);
+    setFinalResumeData(null);
+    setActiveSessionId(null);
+    setShowSidebar(false);
+  };
+
   const handleQuickOption = (option: string) => {
     setInput(option);
-    // Auto-send for quick options
     setTimeout(() => {
       setInput("");
       processMessage(option);
@@ -127,17 +240,21 @@ const ResumeChatbot = () => {
               body: { messages: [...messages, { role: "user", content: userMessage }].map((m) => ({ role: m.role, content: m.content })), currentStep: "experience", collectedData: newData },
             });
             if (error) throw error;
-            setMessages((prev) => [...prev, {
+            const newMsgs: Message[] = [...messages, { role: "user", content: userMessage }, {
               role: "assistant",
               content: data.message || "Great experience! Add another role or type **'done'** to continue.",
               quickOptions: ["done"],
-            }]);
+            }];
+            setMessages(newMsgs);
+            saveSession(newMsgs, currentStep, newData, false, null, activeSessionId);
           } catch {
-            setMessages((prev) => [...prev, {
+            const newMsgs: Message[] = [...messages, { role: "user", content: userMessage }, {
               role: "assistant",
               content: "Nice! Add another role or type **'done'** to move on.",
               quickOptions: ["done"],
-            }]);
+            }];
+            setMessages(newMsgs);
+            saveSession(newMsgs, currentStep, newData, false, null, activeSessionId);
           }
           setLoading(false);
           return;
@@ -152,17 +269,21 @@ const ResumeChatbot = () => {
               body: { messages: [...messages, { role: "user", content: userMessage }].map((m) => ({ role: m.role, content: m.content })), currentStep: "education", collectedData: newData },
             });
             if (error) throw error;
-            setMessages((prev) => [...prev, {
+            const newMsgs: Message[] = [...messages, { role: "user", content: userMessage }, {
               role: "assistant",
               content: data.message || "Got it! Add another or type **'done'**.",
               quickOptions: ["done"],
-            }]);
+            }];
+            setMessages(newMsgs);
+            saveSession(newMsgs, currentStep, newData, false, null, activeSessionId);
           } catch {
-            setMessages((prev) => [...prev, {
+            const newMsgs: Message[] = [...messages, { role: "user", content: userMessage }, {
               role: "assistant",
               content: "Added! Type **'done'** to continue or add more.",
               quickOptions: ["done"],
-            }]);
+            }];
+            setMessages(newMsgs);
+            saveSession(newMsgs, currentStep, newData, false, null, activeSessionId);
           }
           setLoading(false);
           return;
@@ -173,11 +294,13 @@ const ResumeChatbot = () => {
         if (userMessage.toLowerCase() !== "done" && userMessage.toLowerCase() !== "skip") {
           newData.projects = (newData.projects || "") + "\n" + userMessage;
           setCollectedData(newData);
-          setMessages((prev) => [...prev, {
+          const newMsgs: Message[] = [...messages, { role: "user", content: userMessage }, {
             role: "assistant",
             content: "Got it! Add another project or type **'done'** to finish.",
             quickOptions: ["done"],
-          }]);
+          }];
+          setMessages(newMsgs);
+          saveSession(newMsgs, currentStep, newData, false, null, activeSessionId);
           setLoading(false);
           return;
         }
@@ -190,7 +313,8 @@ const ResumeChatbot = () => {
     const nextStep = STEPS_ORDER[currentIndex + 1];
 
     if (nextStep === "complete") {
-      setMessages((prev) => [...prev, { role: "assistant", content: "✨ Perfect! I have all your information. Let me craft your professional resume..." }]);
+      const pendingMsgs: Message[] = [...messages, { role: "user", content: userMessage }, { role: "assistant", content: "✨ Perfect! I have all your information. Let me craft your professional resume..." }];
+      setMessages(pendingMsgs);
       setCurrentStep("complete");
 
       try {
@@ -240,11 +364,16 @@ const ResumeChatbot = () => {
           }
 
           setGeneratedResumeId(savedId);
-          setMessages((prev) => [
-            ...prev.slice(0, -1),
+          const finalMsgs: Message[] = [
+            ...pendingMsgs.slice(0, -1),
             { role: "assistant", content: data.message + "\n\n📥 You can **download your resume** below or **edit it** in the Resume Builder." },
-          ]);
+          ];
+          setMessages(finalMsgs);
           setResumeGenerated(true);
+
+          // Save final session with resume data for future access
+          const sessionData = { ...normalizedData, ...newData };
+          saveSession(finalMsgs, "complete", sessionData, true, savedId, activeSessionId);
         }
       } catch (e: any) {
         console.error("Resume generation error:", e);
@@ -266,11 +395,15 @@ const ResumeChatbot = () => {
         },
       });
       if (error) throw error;
-      setMessages((prev) => [...prev, {
+      const newMsgs: Message[] = [...messages, { role: "user", content: userMessage }, {
         role: "assistant",
         content: data.message,
         quickOptions: QUICK_OPTIONS[nextStep] || [],
-      }]);
+      }];
+      setMessages(newMsgs);
+      // Auto-save session after each step
+      const sid = await saveSession(newMsgs, nextStep, newData, false, null, activeSessionId);
+      if (sid && !activeSessionId) setActiveSessionId(sid);
     } catch {
       const fallbacks: Record<string, string> = {
         email: "What's your **email address**?",
@@ -282,11 +415,14 @@ const ResumeChatbot = () => {
         skills: "List your **key skills** separated by commas.",
         projects: "Any **projects** to showcase? Type **'done'** when finished or **'skip'** to skip.",
       };
-      setMessages((prev) => [...prev, {
+      const newMsgs: Message[] = [...messages, { role: "user", content: userMessage }, {
         role: "assistant",
         content: `Got it! ${fallbacks[nextStep] || ""}`,
         quickOptions: QUICK_OPTIONS[nextStep] || [],
-      }]);
+      }];
+      setMessages(newMsgs);
+      const sid = await saveSession(newMsgs, nextStep, newData, false, null, activeSessionId);
+      if (sid && !activeSessionId) setActiveSessionId(sid);
     }
 
     setLoading(false);
@@ -319,8 +455,6 @@ const ResumeChatbot = () => {
       toast({ title: "No resume data available", variant: "destructive" });
       return;
     }
-
-    // Generate a simple DOCX-compatible HTML blob that Word can open
     const html = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
       <head><meta charset="utf-8"><title>${data.fullName} Resume</title>
@@ -353,8 +487,6 @@ const ResumeChatbot = () => {
   };
 
   const progressPercent = Math.round((STEPS_ORDER.indexOf(currentStep) / (STEPS_ORDER.length - 1)) * 100);
-
-  // Get current quick options
   const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant");
   const currentQuickOptions = lastAssistantMsg?.quickOptions || QUICK_OPTIONS[currentStep] || [];
 
@@ -364,15 +496,77 @@ const ResumeChatbot = () => {
         <div className="container mx-auto max-w-3xl flex flex-col h-full">
           {/* Header */}
           <div className="mb-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Bot className="w-5 h-5 text-primary" />
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Bot className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-foreground">AI Resume Builder</h1>
+                  <p className="text-xs text-muted-foreground">Guided conversation to build your perfect resume</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-foreground">AI Resume Builder</h1>
-                <p className="text-xs text-muted-foreground">Guided conversation to build your perfect resume</p>
+              <div className="flex items-center gap-2">
+                {user && (
+                  <>
+                    <button
+                      onClick={() => setShowSidebar(!showSidebar)}
+                      className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors relative"
+                      title="Chat history"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      {sessions.length > 0 && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center font-bold">
+                          {sessions.length}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={startNewChat}
+                      className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      title="New chat"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
+
+            {/* Chat history sidebar */}
+            {showSidebar && user && (
+              <div className="mb-4 p-3 rounded-xl border border-border bg-card max-h-60 overflow-y-auto">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Previous Chats</h3>
+                {sessions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No previous chats yet.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {sessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors ${
+                          activeSessionId === s.id ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"
+                        }`}
+                      >
+                        <div className="flex-1 min-w-0" onClick={() => loadSession(s)}>
+                          <p className="text-sm font-medium truncate">{s.title}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {new Date(s.created_at).toLocaleDateString()} • {s.resume_generated ? "✅ Complete" : `Step: ${s.current_step}`}
+                          </p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Step indicator pills */}
             <div className="flex gap-1.5 mb-2 flex-wrap">
               {STEPS_ORDER.slice(0, -1).map((step, i) => {
@@ -456,7 +650,6 @@ const ResumeChatbot = () => {
           {/* Input or action buttons */}
           {resumeGenerated ? (
             <div className="space-y-3 pt-4 border-t border-border">
-              {/* Download buttons */}
               <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   onClick={handleDownloadPDF}
@@ -473,7 +666,6 @@ const ResumeChatbot = () => {
                   Download DOCX
                 </button>
               </div>
-              {/* Action buttons */}
               <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   onClick={() => navigate("/resume-builder", { state: { loadResumeId: generatedResumeId } })}
@@ -483,14 +675,7 @@ const ResumeChatbot = () => {
                   Edit in Resume Builder
                 </button>
                 <button
-                  onClick={() => {
-                    setMessages([{ role: "assistant", content: "Hi! 👋 Let's build another resume. What's your **full name**?" }]);
-                    setCurrentStep("greeting");
-                    setCollectedData({});
-                    setResumeGenerated(false);
-                    setGeneratedResumeId(null);
-                    setFinalResumeData(null);
-                  }}
+                  onClick={startNewChat}
                   className="btn-secondary py-3 px-6 flex items-center justify-center gap-2"
                 >
                   <RotateCcw className="w-4 h-4" />

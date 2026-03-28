@@ -41,7 +41,6 @@ function hexToText(hex: string): string {
   const h = hex.replace(/\s/g, "");
   if (h.length % 2 !== 0 && h.length % 4 !== 0) return "";
 
-  // Try 2-byte (UTF-16 BE) first for wide chars
   if (h.length >= 4 && h.length % 4 === 0) {
     let text = "";
     let isWide = false;
@@ -52,7 +51,6 @@ function hexToText(hex: string): string {
     if (isWide && text.trim()) return text;
   }
 
-  // Fall back to 1-byte
   let text = "";
   for (let i = 0; i < h.length; i += 2) {
     const code = parseInt(h.slice(i, i + 2), 16);
@@ -61,16 +59,12 @@ function hexToText(hex: string): string {
   return text;
 }
 
-// ─── PDF literal string decoder ─────────────────────────────────────────────
-
 function decodeLiteral(s: string): string {
   return s
     .replace(/\\n/g, " ").replace(/\\r/g, " ").replace(/\\t/g, "\t")
     .replace(/\\\\/g, "\\").replace(/\\([()])/g, "$1")
     .replace(/\\(\d{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
 }
-
-// ─── Extract text from a decoded content-stream string ───────────────────────
 
 function extractFromContentStream(decoded: string): string[] {
   const chunks: string[] = [];
@@ -80,10 +74,8 @@ function extractFromContentStream(decoded: string): string[] {
     const block = btMatch[1];
     let hasNewline = false;
 
-    // Td / TD / T* / Tm introduce newlines
     if (/T[dDm*]/.test(block)) hasNewline = true;
 
-    // TJ array: [ (text) n (text) <hex> ... ] TJ
     for (const arr of block.matchAll(/\[([\s\S]*?)\]\s*TJ/gi)) {
       const inner = arr[1];
       for (const sp of inner.matchAll(/\(([^)]*)\)/g)) {
@@ -96,13 +88,11 @@ function extractFromContentStream(decoded: string): string[] {
       }
     }
 
-    // Single Tj
     for (const tj of block.matchAll(/\(([^)]*)\)\s*Tj/g)) {
       const t = decodeLiteral(tj[1]);
       if (t.trim()) chunks.push(t);
     }
 
-    // Hex Tj
     for (const htj of block.matchAll(/<([0-9a-fA-F\s]+)>\s*Tj/g)) {
       const t = hexToText(htj[1]);
       if (t.trim()) chunks.push(t);
@@ -113,8 +103,6 @@ function extractFromContentStream(decoded: string): string[] {
 
   return chunks;
 }
-
-// ─── Main PDF text extractor ─────────────────────────────────────────────────
 
 function normalizeExtractedText(input: string): string {
   return input
@@ -153,7 +141,6 @@ async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
   const raw = latin1.decode(bytes);
   const allChunks: string[] = [];
 
-  // Find all stream/endstream pairs
   const streamRegex = /<<([\s\S]{1,3000}?)>>\s*stream\r?\n/g;
   let m: RegExpExecArray | null;
 
@@ -196,7 +183,6 @@ async function extractTextFromPdfBytes(bytes: Uint8Array): Promise<string> {
   console.log(`Extracted text length: ${text.length}`);
   console.log(`Preview: ${text.substring(0, 800)}`);
 
-  // Fallback: if short, use printable-run heuristic
   if (text.length < 300) {
     console.log("Short extraction, trying UTF-8 printable fallback...");
     const full = utf8.decode(bytes);
@@ -250,62 +236,163 @@ async function extractTextWithPdfJs(bytes: Uint8Array): Promise<string> {
   }
 }
 
-// ─── DOCX text extractor (basic XML parsing) ────────────────────────────────
+// ─── Proper DOCX text extractor using ZIP decompression ────────────────────
 
 async function extractTextFromDocx(blob: Blob): Promise<string> {
   try {
-    // DOCX is a ZIP containing XML files. We'll look for word/document.xml
     const arrayBuf = await blob.arrayBuffer();
     const bytes = new Uint8Array(arrayBuf);
-    
-    // Find PK signature (ZIP)
+
+    // Verify ZIP signature
     if (bytes[0] !== 0x50 || bytes[1] !== 0x4B) {
-      // Not a valid ZIP/DOCX, try plain text
+      console.warn("Not a valid ZIP/DOCX file, trying plain text");
       return await blob.text();
     }
 
-    // Simple approach: convert to text and extract from XML tags
-    const decoder = new TextDecoder("utf-8", { fatal: false });
-    const fullText = decoder.decode(bytes);
+    // Parse ZIP to find word/document.xml
+    const entries = parseZipEntries(bytes);
+    console.log(`DOCX ZIP entries found: ${entries.length}`);
     
-    // Find word/document.xml content in the ZIP
-    const docXmlStart = fullText.indexOf("<w:body");
-    if (docXmlStart === -1) {
-      // Fallback: extract any readable text
-      return await blob.text();
+    let documentXml = "";
+    
+    for (const entry of entries) {
+      if (entry.name === "word/document.xml") {
+        const rawData = extractZipEntry(bytes, entry);
+        if (entry.compressionMethod === 8) {
+          // Deflate compressed
+          const decompressed = await zlibDecompress(rawData);
+          if (decompressed) {
+            documentXml = new TextDecoder("utf-8").decode(decompressed);
+          }
+        } else {
+          // Stored (no compression)
+          documentXml = new TextDecoder("utf-8").decode(rawData);
+        }
+        break;
+      }
     }
-    
-    const docXmlEnd = fullText.indexOf("</w:body>", docXmlStart);
-    const docXml = fullText.substring(docXmlStart, docXmlEnd > -1 ? docXmlEnd + 9 : undefined);
-    
-    // Extract text from <w:t> tags
-    const textParts: string[] = [];
-    const regex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
-    let match;
-    while ((match = regex.exec(docXml)) !== null) {
-      if (match[1].trim()) textParts.push(match[1]);
+
+    if (!documentXml) {
+      console.warn("word/document.xml not found in DOCX");
+      // Fallback: try the old naive approach
+      return extractDocxNaive(bytes);
     }
+
+    console.log(`document.xml length: ${documentXml.length}`);
+
+    // Parse XML to extract text preserving paragraph structure
+    const result: string[] = [];
     
-    // Also handle paragraph breaks
-    let result = "";
-    const paragraphs = docXml.split(/<\/w:p>/);
+    // Split by paragraphs (<w:p>...</w:p>)
+    const paragraphs = documentXml.split(/<\/w:p>/);
+    
     for (const para of paragraphs) {
       const paraTexts: string[] = [];
+      
+      // Extract text from <w:t> tags (handles xml:space="preserve" attribute)
       const tRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
       let tMatch;
       while ((tMatch = tRegex.exec(para)) !== null) {
         paraTexts.push(tMatch[1]);
       }
-      if (paraTexts.length > 0) {
-        result += paraTexts.join("") + "\n";
+      
+      // Check for tab characters (<w:tab/>)
+      if (/<w:tab\s*\/>/.test(para)) {
+        // Join with tab-aware spacing
+        const lineText = paraTexts.join("");
+        if (lineText.trim()) result.push(lineText);
+      } else if (paraTexts.length > 0) {
+        const lineText = paraTexts.join("");
+        if (lineText.trim()) result.push(lineText);
       }
     }
+
+    const extractedText = result.join("\n");
+    console.log(`DOCX extracted text length: ${extractedText.length}`);
+    console.log(`DOCX preview: ${extractedText.substring(0, 500)}`);
     
-    return result.trim() || textParts.join(" ");
+    return extractedText.trim() || extractDocxNaive(bytes);
   } catch (e) {
     console.error("DOCX extraction error:", e);
     return await blob.text();
   }
+}
+
+interface ZipEntry {
+  name: string;
+  compressionMethod: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  dataOffset: number;
+}
+
+function parseZipEntries(bytes: Uint8Array): ZipEntry[] {
+  const entries: ZipEntry[] = [];
+  let offset = 0;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  
+  while (offset < bytes.length - 4) {
+    // Look for local file header signature: PK\x03\x04
+    if (bytes[offset] === 0x50 && bytes[offset + 1] === 0x4B && 
+        bytes[offset + 2] === 0x03 && bytes[offset + 3] === 0x04) {
+      
+      const compressionMethod = view.getUint16(offset + 8, true);
+      const compressedSize = view.getUint32(offset + 18, true);
+      const uncompressedSize = view.getUint32(offset + 22, true);
+      const fileNameLength = view.getUint16(offset + 26, true);
+      const extraFieldLength = view.getUint16(offset + 28, true);
+      
+      const fileName = new TextDecoder().decode(bytes.slice(offset + 30, offset + 30 + fileNameLength));
+      const dataOffset = offset + 30 + fileNameLength + extraFieldLength;
+      
+      entries.push({
+        name: fileName,
+        compressionMethod,
+        compressedSize,
+        uncompressedSize,
+        dataOffset,
+      });
+      
+      // Move to next entry
+      offset = dataOffset + compressedSize;
+    } else {
+      offset++;
+    }
+  }
+  
+  return entries;
+}
+
+function extractZipEntry(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
+  return bytes.slice(entry.dataOffset, entry.dataOffset + entry.compressedSize);
+}
+
+function extractDocxNaive(bytes: Uint8Array): string {
+  // Fallback: scan raw bytes for <w:t> tags (works when ZIP parsing fails)
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const fullText = decoder.decode(bytes);
+  
+  const docXmlStart = fullText.indexOf("<w:body");
+  if (docXmlStart === -1) return "";
+  
+  const docXmlEnd = fullText.indexOf("</w:body>", docXmlStart);
+  const docXml = fullText.substring(docXmlStart, docXmlEnd > -1 ? docXmlEnd + 9 : undefined);
+  
+  const result: string[] = [];
+  const paragraphs = docXml.split(/<\/w:p>/);
+  for (const para of paragraphs) {
+    const paraTexts: string[] = [];
+    const tRegex = /<w:t[^>]*>([^<]*)<\/w:t>/g;
+    let tMatch;
+    while ((tMatch = tRegex.exec(para)) !== null) {
+      paraTexts.push(tMatch[1]);
+    }
+    if (paraTexts.length > 0) {
+      result.push(paraTexts.join(""));
+    }
+  }
+  
+  return result.join("\n").trim();
 }
 
 async function extractText(fileData: Blob, fileName: string): Promise<string> {
@@ -317,8 +404,6 @@ async function extractText(fileData: Blob, fileName: string): Promise<string> {
     const streamText = await extractTextFromPdfBytes(bytes);
     const streamScore = scoreTextQuality(streamText);
 
-    // pdf.js handles encoded fonts and complex object streams much better.
-    // Run this fallback when stream extraction quality is poor.
     if (streamScore < 45 || streamText.length < 500) {
       const pdfJsText = await extractTextWithPdfJs(bytes);
       const pdfJsScore = scoreTextQuality(pdfJsText);
@@ -378,6 +463,14 @@ serve(async (req) => {
 
 Your CRITICAL task: extract EVERY piece of information from the resume text with 100% accuracy and fidelity.
 
+MULTI-LANGUAGE SUPPORT:
+- The resume may be written in ANY language (Hindi, Tamil, Telugu, Kannada, Marathi, Bengali, French, German, Spanish, Arabic, Chinese, Japanese, Korean, etc.)
+- You MUST be able to read and understand the resume content regardless of its language
+- ALL your output (name, summary, skills, improvement tips, etc.) MUST be in ENGLISH
+- Transliterate names from non-Latin scripts to their English/Roman equivalent
+- Translate all job titles, degree names, company names, and skills into English
+- If the resume mixes languages, extract all content and translate to English
+
 ABSOLUTE RULES — VIOLATION = FAILURE:
 1. ONLY use information EXPLICITLY present in the text. NEVER fabricate, hallucinate, or guess ANY data.
 2. If a field is missing from the resume, return null — NOT a placeholder.
@@ -390,7 +483,7 @@ ABSOLUTE RULES — VIOLATION = FAILURE:
 9. Extract ALL skills mentioned anywhere: programming languages, frameworks, tools, databases, cloud services, methodologies, soft skills, certifications.
 10. For each experience entry: exact job title, exact company name, exact date range as written.
 11. For each education entry: exact degree name, exact institution name, graduation year or date range.
-12. Write a 2-3 sentence professional summary based SOLELY on the actual resume content — mention specific technologies, years of experience, and domain expertise found in the resume.
+12. Write a 2-3 sentence professional summary IN ENGLISH based SOLELY on the actual resume content — mention specific technologies, years of experience, and domain expertise found in the resume.
 13. Score the resume 0-100 based on:
    - Contact info completeness (name, email, phone, location) = 15 points
    - Professional summary quality = 10 points
@@ -398,7 +491,7 @@ ABSOLUTE RULES — VIOLATION = FAILURE:
    - Experience depth (descriptions, quantified achievements) = 30 points
    - Education = 10 points
    - Projects/achievements/certifications = 15 points
-14. Generate 3-5 PERSONALIZED improvement tips based on what's ACTUALLY in or missing from THIS specific resume. Reference specific sections and skills. Do NOT give generic tips.
+14. Generate 3-5 PERSONALIZED improvement tips IN ENGLISH based on what's ACTUALLY in or missing from THIS specific resume. Reference specific sections and skills. Do NOT give generic tips.
 
 IMPROVEMENT TIP RULES:
 - Each tip must reference something specific from the resume or a specific gap
@@ -418,7 +511,7 @@ IMPROVEMENT TIP RULES:
           { role: "system", content: systemPrompt },
           {
             role: "user",
-            content: `Parse this resume with maximum accuracy. Extract every detail faithfully. Generate personalized improvement tips specific to THIS resume's content.\n\n---RESUME TEXT (${text.length} characters)---\n${text.substring(0, 20000)}\n---END---`,
+            content: `Parse this resume with maximum accuracy. The resume may be in any language — extract all information and provide output in English. Generate personalized improvement tips specific to THIS resume's content.\n\n---RESUME TEXT (${text.length} characters)---\n${text.substring(0, 20000)}\n---END---`,
           },
         ],
         tools: [
@@ -426,26 +519,26 @@ IMPROVEMENT TIP RULES:
             type: "function",
             function: {
               name: "parse_resume",
-              description: "Extract all structured resume data with maximum accuracy and generate personalized tips.",
+              description: "Extract all structured resume data with maximum accuracy and generate personalized tips. All output must be in English regardless of resume language.",
               parameters: {
                 type: "object",
                 properties: {
-                  name: { type: "string", description: "Full legal name of the candidate (first + last at minimum). Must be from actual resume, never a placeholder." },
+                  name: { type: "string", description: "Full legal name of the candidate (first + last at minimum). Must be from actual resume, never a placeholder. Transliterate from non-Latin scripts." },
                   email: { type: "string", description: "Primary email address exactly as found" },
                   phone: { type: "string", description: "Phone number exactly as found" },
                   location: { type: "string", description: "City, State/Country" },
-                  summary: { type: "string", description: "2-3 sentence professional summary based on ACTUAL resume content, mentioning specific skills and experience" },
+                  summary: { type: "string", description: "2-3 sentence professional summary IN ENGLISH based on ACTUAL resume content, mentioning specific skills and experience" },
                   skills: {
                     type: "array",
                     items: { type: "string" },
-                    description: "ALL skills mentioned: languages, frameworks, tools, databases, cloud, methodologies, soft skills, certifications",
+                    description: "ALL skills mentioned anywhere: languages, frameworks, tools, databases, cloud, methodologies, soft skills, certifications. Translate to English.",
                   },
                   experience: {
                     type: "array",
                     items: {
                       type: "object",
                       properties: {
-                        title: { type: "string", description: "Exact job title" },
+                        title: { type: "string", description: "Exact job title (translated to English)" },
                         company: { type: "string", description: "Exact company/organization name" },
                         duration: { type: "string", description: "Exact date range e.g. 'Jan 2021 – Mar 2023'" },
                       },
@@ -457,7 +550,7 @@ IMPROVEMENT TIP RULES:
                     items: {
                       type: "object",
                       properties: {
-                        degree: { type: "string", description: "Exact degree or certification name" },
+                        degree: { type: "string", description: "Exact degree or certification name (translated to English)" },
                         institution: { type: "string", description: "Exact university/institution name" },
                         year: { type: "string", description: "Graduation year or date range" },
                       },
@@ -475,11 +568,11 @@ IMPROVEMENT TIP RULES:
                       properties: {
                         type: { type: "string", enum: ["warning", "suggestion", "improvement"], description: "Tip severity" },
                         skill: { type: "string", description: "Short label for the tip area (e.g. 'Missing Projects Section', 'Quantify Achievements')" },
-                        message: { type: "string", description: "Specific, actionable advice referencing THIS resume's content" },
+                        message: { type: "string", description: "Specific, actionable advice IN ENGLISH referencing THIS resume's content" },
                       },
                       required: ["type", "skill", "message"],
                     },
-                    description: "3-5 personalized tips specific to THIS resume",
+                    description: "3-5 personalized tips in English specific to THIS resume",
                   },
                 },
                 required: ["name", "skills", "experience", "education", "overall_score", "improvement_tips"],
