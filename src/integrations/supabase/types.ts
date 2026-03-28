@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      chatbot_sessions: {
+        Row: {
+          collected_data: Json
+          created_at: string | null
+          current_step: string
+          generated_resume_id: string | null
+          id: string
+          messages: Json
+          resume_generated: boolean
+          title: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          collected_data?: Json
+          created_at?: string | null
+          current_step?: string
+          generated_resume_id?: string | null
+          id?: string
+          messages?: Json
+          resume_generated?: boolean
+          title?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          collected_data?: Json
+          created_at?: string | null
+          current_step?: string
+          generated_resume_id?: string | null
+          id?: string
+          messages?: Json
+          resume_generated?: boolean
+          title?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_sessions_generated_resume_id_fkey"
+            columns: ["generated_resume_id"]
+            isOneToOne: false
+            referencedRelation: "user_resumes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           candidate_id: string
