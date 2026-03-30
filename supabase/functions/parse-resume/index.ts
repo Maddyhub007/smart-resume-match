@@ -12,24 +12,41 @@ const corsHeaders = {
 async function zlibDecompress(data: Uint8Array): Promise<Uint8Array | null> {
   for (const format of ["deflate", "deflate-raw"] as const) {
     try {
-      const ds = new DecompressionStream(format);
-      const writer = ds.writable.getWriter();
-      const reader = ds.readable.getReader();
-      writer.write(data);
-      writer.close();
+      const result = await new Promise<Uint8Array | null>((resolve) => {
+        try {
+          const ds = new DecompressionStream(format);
+          const writer = ds.writable.getWriter();
+          const reader = ds.readable.getReader();
 
-      const chunks: Uint8Array[] = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
+          const chunks: Uint8Array[] = [];
+          let errored = false;
 
-      const total = chunks.reduce((n, c) => n + c.length, 0);
-      const out = new Uint8Array(total);
-      let off = 0;
-      for (const c of chunks) { out.set(c, off); off += c.length; }
-      if (out.length > 10) return out;
+          writer.write(data).catch(() => { errored = true; });
+          writer.close().catch(() => { errored = true; });
+
+          const readAll = async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+              }
+              if (errored || chunks.length === 0) { resolve(null); return; }
+              const total = chunks.reduce((n, c) => n + c.length, 0);
+              const out = new Uint8Array(total);
+              let off = 0;
+              for (const c of chunks) { out.set(c, off); off += c.length; }
+              resolve(out.length > 10 ? out : null);
+            } catch (_) {
+              resolve(null);
+            }
+          };
+          readAll();
+        } catch (_) {
+          resolve(null);
+        }
+      });
+      if (result) return result;
     } catch (_) { /* try next */ }
   }
   return null;
