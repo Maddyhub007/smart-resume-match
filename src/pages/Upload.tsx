@@ -335,8 +335,6 @@ const Upload = () => {
   );
 };
 
-export default Upload;
-            <div className="mt-10">
               <h2 className="text-lg font-bold text-foreground mb-1 flex items-center gap-2">
                 <FileText className="w-5 h-5 text-primary" />
                 My Uploaded Resumes
