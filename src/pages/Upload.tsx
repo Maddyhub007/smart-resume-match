@@ -269,7 +269,10 @@ const Upload = () => {
           )}
 
           {/* My Resumes - Active Resume Selector */}
-          {!isParsing && allResumes.length > 0 && (
+          {!isParsing && allResumes.length > 0 && (() => {
+            // Only the FIRST is_active resume is treated as truly active
+            const activeId = allResumes.find((r) => r.is_active)?.id || null;
+            return (
             <div className="mt-10">
               <h2 className="text-lg font-bold text-foreground mb-1 flex items-center gap-2">
                 <FileText className="w-5 h-5 text-primary" />
@@ -279,11 +282,13 @@ const Upload = () => {
                 Set an active resume to control which one is used for job matching scores.
               </p>
               <div className="space-y-2">
-                {allResumes.map((r) => (
+                {allResumes.map((r) => {
+                  const isActive = r.id === activeId;
+                  return (
                   <div
                     key={r.id}
                     className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all ${
-                      r.is_active
+                      isActive
                         ? "border-primary bg-primary/5 shadow-sm"
                         : "border-border hover:border-primary/40"
                     }`}
@@ -291,7 +296,7 @@ const Upload = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-sm text-foreground truncate">{r.file_name}</p>
-                        {r.is_active && (
+                        {isActive && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary text-primary-foreground">
                             <Check className="w-3 h-3" /> Active
                           </span>
@@ -302,7 +307,7 @@ const Upload = () => {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {!r.is_active && (
+                      {!isActive && (
                         <button
                           onClick={() => setActiveResume(r.id)}
                           className="text-xs font-medium px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
@@ -318,10 +323,12 @@ const Upload = () => {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </Layout>
