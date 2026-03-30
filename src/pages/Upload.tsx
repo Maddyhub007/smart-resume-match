@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, Loader2, Sparkles, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Loader2, Sparkles, CheckCircle2, FileText, Check, Trash2 } from "lucide-react";
 import Layout from "../components/layout/Layout";
 import FileUploadZone from "../components/upload/FileUploadZone";
 import ParsedResumePreview from "../components/upload/ParsedResumePreview";
@@ -26,6 +26,41 @@ const Upload = () => {
   const [parsedResume, setParsedResume] = useState<any>(null);
   const [resumeId, setResumeId] = useState<string | null>(null);
 
+  // All uploaded resumes
+  const [allResumes, setAllResumes] = useState<any[]>([]);
+  const [loadingResumes, setLoadingResumes] = useState(true);
+
+  useEffect(() => {
+    if (user) fetchAllResumes();
+  }, [user]);
+
+  const fetchAllResumes = async () => {
+    if (!user) return;
+    setLoadingResumes(true);
+    const { data } = await supabase
+      .from("resumes")
+      .select("id, file_name, parsed_name, parsed_skills, overall_score, is_active, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    setAllResumes(data || []);
+    setLoadingResumes(false);
+  };
+
+  const setActiveResume = async (id: string) => {
+    if (!user) return;
+    // Deactivate all, then activate selected
+    await supabase.from("resumes").update({ is_active: false }).eq("user_id", user.id);
+    await supabase.from("resumes").update({ is_active: true }).eq("id", id);
+    toast({ title: "Active resume updated! Job matches will use this resume." });
+    fetchAllResumes();
+  };
+
+  const deleteResume = async (id: string) => {
+    await supabase.from("resumes").delete().eq("id", id);
+    toast({ title: "Resume deleted." });
+    fetchAllResumes();
+  };
+
   const handleFileSelect = async (selectedFile: File) => {
     if (!user) {
       toast({ title: "Please sign in first", variant: "destructive" });
@@ -50,9 +85,12 @@ const Upload = () => {
       if (uploadError) throw uploadError;
       setUploadProgress(100);
 
+      // Deactivate all existing resumes, new one becomes active
+      await supabase.from("resumes").update({ is_active: false }).eq("user_id", user.id);
+
       const { data: resumeData, error: insertError } = await supabase
         .from("resumes")
-        .insert({ user_id: user.id, file_name: selectedFile.name, file_url: filePath })
+        .insert({ user_id: user.id, file_name: selectedFile.name, file_url: filePath, is_active: true })
         .select()
         .single();
 
@@ -85,6 +123,7 @@ const Upload = () => {
       
       setIsParsing(false);
       toast({ title: "Resume analysed successfully! 🎉" });
+      fetchAllResumes();
     } catch (error: any) {
       console.error("Upload error:", error);
       setIsUploading(false);
@@ -225,6 +264,61 @@ const Upload = () => {
                   Continue to Dashboard
                   <ArrowRight className="w-5 h-5" />
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* My Resumes - Active Resume Selector */}
+          {!isParsing && allResumes.length > 0 && (
+            <div className="mt-10">
+              <h2 className="text-lg font-bold text-foreground mb-1 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-primary" />
+                My Uploaded Resumes
+              </h2>
+              <p className="text-sm text-muted-foreground mb-4">
+                Set an active resume to control which one is used for job matching scores.
+              </p>
+              <div className="space-y-2">
+                {allResumes.map((r) => (
+                  <div
+                    key={r.id}
+                    className={`flex items-center gap-4 px-4 py-3 rounded-xl border transition-all ${
+                      r.is_active
+                        ? "border-primary bg-primary/5 shadow-sm"
+                        : "border-border hover:border-primary/40"
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm text-foreground truncate">{r.file_name}</p>
+                        {r.is_active && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary text-primary-foreground">
+                            <Check className="w-3 h-3" /> Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {r.parsed_name || "Unnamed"} • {(r.parsed_skills || []).length} skills • Score: {r.overall_score || 0}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {!r.is_active && (
+                        <button
+                          onClick={() => setActiveResume(r.id)}
+                          className="text-xs font-medium px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                        >
+                          Set Active
+                        </button>
+                      )}
+                      <button
+                        onClick={() => deleteResume(r.id)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
