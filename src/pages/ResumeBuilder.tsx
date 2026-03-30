@@ -165,18 +165,9 @@ const ResumeBuilder = () => {
     setTemplates(templatesRes.data || []);
     setUserResumes(resumesRes.data || []);
 
-    if (profile) {
-      setResumeData((prev) => ({
-        ...prev,
-        fullName: profile.full_name || "",
-        email: profile.email || user?.email || "",
-        phone: profile.phone || "",
-        location: profile.location || "",
-      }));
-    }
-
+    // Load data from the active uploaded resume only (not from profile)
     const { data: latestResume } = await supabase
-      .from("resumes").select("*").eq("user_id", user!.id)
+      .from("resumes").select("*").eq("user_id", user!.id).eq("is_active", true)
       .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
     if (latestResume && latestResume.parsed_skills?.length > 0) {
