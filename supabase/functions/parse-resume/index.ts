@@ -252,7 +252,7 @@ async function extractTextFromDocx(blob: Blob): Promise<string> {
     // Parse ZIP to find word/document.xml
     const entries = parseZipEntries(bytes);
     console.log(`DOCX ZIP entries found: ${entries.length}`);
-    
+    console.log(`Entry names: ${entries.map(e => e.name).join(', ')}`);
     let documentXml = "";
     
     for (const entry of entries) {
@@ -328,38 +328,74 @@ interface ZipEntry {
 
 function parseZipEntries(bytes: Uint8Array): ZipEntry[] {
   const entries: ZipEntry[] = [];
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  
+  // Find End of Central Directory (EOCD) signature: PK\x05\x06
+  // Search backwards from the end
+  let eocdOffset = -1;
+  for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 65558; i--) {
+    if (bytes[i] === 0x50 && bytes[i+1] === 0x4B && bytes[i+2] === 0x05 && bytes[i+3] === 0x06) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  
+  if (eocdOffset === -1) {
+    console.warn("EOCD not found, falling back to local header scan");
+    return parseZipEntriesLocal(bytes);
+  }
+  
+  const cdOffset = view.getUint32(eocdOffset + 16, true);
+  const cdEntries = view.getUint16(eocdOffset + 10, true);
+  
+  let offset = cdOffset;
+  for (let i = 0; i < cdEntries && offset < bytes.length - 46; i++) {
+    // Central directory header: PK\x01\x02
+    if (bytes[offset] !== 0x50 || bytes[offset+1] !== 0x4B || bytes[offset+2] !== 0x01 || bytes[offset+3] !== 0x02) break;
+    
+    const compressionMethod = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const uncompressedSize = view.getUint32(offset + 24, true);
+    const fileNameLength = view.getUint16(offset + 28, true);
+    const extraFieldLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localHeaderOffset = view.getUint32(offset + 42, true);
+    
+    const fileName = new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + fileNameLength));
+    
+    // Calculate actual data offset from local file header
+    const localFileNameLen = view.getUint16(localHeaderOffset + 26, true);
+    const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
+    const dataOffset = localHeaderOffset + 30 + localFileNameLen + localExtraLen;
+    
+    entries.push({ name: fileName, compressionMethod, compressedSize, uncompressedSize, dataOffset });
+    
+    offset += 46 + fileNameLength + extraFieldLength + commentLength;
+  }
+  
+  return entries;
+}
+
+function parseZipEntriesLocal(bytes: Uint8Array): ZipEntry[] {
+  const entries: ZipEntry[] = [];
   let offset = 0;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   
-  while (offset < bytes.length - 4) {
-    // Look for local file header signature: PK\x03\x04
-    if (bytes[offset] === 0x50 && bytes[offset + 1] === 0x4B && 
-        bytes[offset + 2] === 0x03 && bytes[offset + 3] === 0x04) {
-      
+  while (offset < bytes.length - 30) {
+    if (bytes[offset] === 0x50 && bytes[offset+1] === 0x4B && bytes[offset+2] === 0x03 && bytes[offset+3] === 0x04) {
       const compressionMethod = view.getUint16(offset + 8, true);
       const compressedSize = view.getUint32(offset + 18, true);
       const uncompressedSize = view.getUint32(offset + 22, true);
       const fileNameLength = view.getUint16(offset + 26, true);
       const extraFieldLength = view.getUint16(offset + 28, true);
-      
       const fileName = new TextDecoder().decode(bytes.slice(offset + 30, offset + 30 + fileNameLength));
       const dataOffset = offset + 30 + fileNameLength + extraFieldLength;
-      
-      entries.push({
-        name: fileName,
-        compressionMethod,
-        compressedSize,
-        uncompressedSize,
-        dataOffset,
-      });
-      
-      // Move to next entry
-      offset = dataOffset + compressedSize;
+      entries.push({ name: fileName, compressionMethod, compressedSize, uncompressedSize, dataOffset });
+      offset = dataOffset + (compressedSize > 0 ? compressedSize : 1);
     } else {
       offset++;
     }
   }
-  
   return entries;
 }
 
