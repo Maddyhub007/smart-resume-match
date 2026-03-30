@@ -252,7 +252,7 @@ async function extractTextFromDocx(blob: Blob): Promise<string> {
     // Parse ZIP to find word/document.xml
     const entries = parseZipEntries(bytes);
     console.log(`DOCX ZIP entries found: ${entries.length}`);
-    
+    console.log(`Entry names: ${entries.map(e => e.name).join(', ')}`);
     let documentXml = "";
     
     for (const entry of entries) {
