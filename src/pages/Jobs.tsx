@@ -518,6 +518,7 @@ const Jobs = () => {
               </div>
             )}
 
+            <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
               {/* Default option - uploaded resume */}
               <button
                 onClick={() => setSelectedResumeId("uploaded")}
