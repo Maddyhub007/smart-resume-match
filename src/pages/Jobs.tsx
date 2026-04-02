@@ -506,7 +506,18 @@ const Jobs = () => {
               Choose which resume to submit for <span className="font-medium text-foreground">{applyingJob?.title}</span>
             </p>
 
-            <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+            {/* Skill Match Breakdown */}
+            {applyingJob && candidateSkills.length > 0 && (applyingJob.skills_required || []).length > 0 && (
+              <div className="mb-4 p-3 rounded-xl bg-muted/30 border border-border">
+                <p className="text-xs font-semibold text-foreground mb-2">Your Skill Match for this Job</p>
+                <SkillMatchBreakdown
+                  candidateSkills={candidateSkills}
+                  jobSkills={applyingJob.skills_required || []}
+                  compact
+                />
+              </div>
+            )}
+
               {/* Default option - uploaded resume */}
               <button
                 onClick={() => setSelectedResumeId("uploaded")}
