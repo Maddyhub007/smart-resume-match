@@ -4,6 +4,7 @@ import { Briefcase, Loader2, Globe, Building2, Search, ChevronLeft, ChevronRight
 import Layout from "../components/layout/Layout";
 import JobCard from "../components/ui/JobCard";
 import ExternalJobCard from "../components/ui/ExternalJobCard";
+import SkillMatchBreakdown from "@/components/recruiter/SkillMatchBreakdown";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -66,6 +67,7 @@ const Jobs = () => {
   const [applyingJob, setApplyingJob] = useState<any>(null);
   const [userResumes, setUserResumes] = useState<any[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null);
+  const [candidateSkills, setCandidateSkills] = useState<string[]>([]);
 
   // Internal jobs
   useEffect(() => {
@@ -101,7 +103,9 @@ const Jobs = () => {
           .from("resumes").select("parsed_skills").eq("user_id", user.id).eq("is_active", true)
           .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
-        const candidateSkills = (resume?.parsed_skills || []).map((s: string) => s.toLowerCase());
+        const skills = resume?.parsed_skills || [];
+        setCandidateSkills(skills);
+        const candidateSkills = skills.map((s: string) => s.toLowerCase());
         const jobsWithScores = data.map((job) => {
           const jobSkills = (job.skills_required || []).map((s: string) => s.toLowerCase());
           const matchCount = jobSkills.filter((s: string) => candidateSkills.includes(s)).length;
@@ -501,6 +505,18 @@ const Jobs = () => {
             <p className="text-sm text-muted-foreground mb-4">
               Choose which resume to submit for <span className="font-medium text-foreground">{applyingJob?.title}</span>
             </p>
+
+            {/* Skill Match Breakdown */}
+            {applyingJob && candidateSkills.length > 0 && (applyingJob.skills_required || []).length > 0 && (
+              <div className="mb-4 p-3 rounded-xl bg-muted/30 border border-border">
+                <p className="text-xs font-semibold text-foreground mb-2">Your Skill Match for this Job</p>
+                <SkillMatchBreakdown
+                  candidateSkills={candidateSkills}
+                  jobSkills={applyingJob.skills_required || []}
+                  compact
+                />
+              </div>
+            )}
 
             <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
               {/* Default option - uploaded resume */}

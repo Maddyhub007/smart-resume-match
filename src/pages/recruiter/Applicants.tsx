@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Users, ArrowLeft, MessageSquare, Loader2, CheckCircle, XCircle, Clock, Eye } from "lucide-react";
+import { Users, ArrowLeft, MessageSquare, Loader2, CheckCircle, XCircle, Clock, Eye, Download, ChevronDown, ChevronUp } from "lucide-react";
 import Layout from "@/components/layout/Layout";
 import MatchScoreRing from "@/components/ui/MatchScoreRing";
+import SkillMatchBreakdown from "@/components/recruiter/SkillMatchBreakdown";
+import TopApplicants from "@/components/recruiter/TopApplicants";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -14,6 +16,7 @@ const Applicants = () => {
   const [job, setJob] = useState<any>(null);
   const [applicants, setApplicants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (jobId) fetchData();
@@ -21,19 +24,15 @@ const Applicants = () => {
 
   const fetchData = async () => {
     setLoading(true);
-
-    // Fetch job
     const { data: jobData } = await supabase.from("jobs").select("*").eq("id", jobId!).single();
     setJob(jobData);
 
-    // Fetch applications
     const { data: apps } = await supabase
       .from("job_applications")
-      .select("*, resumes(parsed_skills, overall_score, file_name, parsed_name)")
+      .select("*, resumes(parsed_skills, overall_score, file_name, parsed_name, file_url)")
       .eq("job_id", jobId!)
       .order("created_at", { ascending: false });
 
-    // Enrich with candidate profiles
     const enriched = await Promise.all(
       (apps || []).map(async (app) => {
         const { data: prof } = await supabase
@@ -45,7 +44,6 @@ const Applicants = () => {
       })
     );
 
-    // Sort by match score desc
     enriched.sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
     setApplicants(enriched);
     setLoading(false);
@@ -61,8 +59,24 @@ const Applicants = () => {
     toast({ title: `Candidate ${status === "shortlisted" ? "accepted" : status === "rejected" ? "rejected" : "updated to " + status}` });
   };
 
+  const downloadResume = async (fileUrl: string, fileName: string) => {
+    try {
+      const path = fileUrl.replace(/^.*\/object\/(?:public|sign)\/resumes\//, "");
+      const { data, error } = await supabase.storage.from("resumes").download(path);
+      if (error) throw error;
+      const url = URL.createObjectURL(data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName || "resume";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Resume downloaded ✅" });
+    } catch (e: any) {
+      toast({ title: "Download failed", description: e.message, variant: "destructive" });
+    }
+  };
+
   const startChat = async (candidateId: string) => {
-    // Check if conversation exists
     const { data: existing } = await supabase
       .from("conversations")
       .select("id")
@@ -71,10 +85,7 @@ const Applicants = () => {
       .eq("job_id", jobId!)
       .maybeSingle();
 
-    if (existing) {
-      navigate(`/chat/${existing.id}`);
-      return;
-    }
+    if (existing) { navigate(`/chat/${existing.id}`); return; }
 
     const { data, error } = await supabase
       .from("conversations")
@@ -87,6 +98,14 @@ const Applicants = () => {
     } else {
       navigate(`/chat/${data.id}`);
     }
+  };
+
+  const toggleSkills = (appId: string) => {
+    setExpandedSkills((prev) => {
+      const next = new Set(prev);
+      next.has(appId) ? next.delete(appId) : next.add(appId);
+      return next;
+    });
   };
 
   const getStatusColor = (status: string) => {
@@ -129,6 +148,9 @@ const Applicants = () => {
             <p className="text-muted-foreground">{job?.company} • {job?.location || "Remote"} • {applicants.length} applicant(s)</p>
           </div>
 
+          {/* Top Candidates */}
+          {applicants.length > 1 && <TopApplicants applicants={applicants} />}
+
           {applicants.length === 0 ? (
             <div className="card-elevated p-12 text-center">
               <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -137,92 +159,108 @@ const Applicants = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              {applicants.map((app) => (
-                <div key={app.id} className="card-elevated p-6">
-                  <div className="flex flex-col gap-4">
-                    {/* Top row: candidate info + match score */}
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-                          <span className="text-lg font-bold text-primary">
-                            {(app.candidateProfile?.full_name || "U")[0].toUpperCase()}
+              {applicants.map((app) => {
+                const resume = app.resumes as any;
+                const candidateSkills = resume?.parsed_skills || [];
+                const jobSkills = job?.skills_required || [];
+                const isExpanded = expandedSkills.has(app.id);
+
+                return (
+                  <div key={app.id} className="card-elevated p-6">
+                    <div className="flex flex-col gap-4">
+                      {/* Top row */}
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <span className="text-lg font-bold text-primary">
+                              {(app.candidateProfile?.full_name || "U")[0].toUpperCase()}
+                            </span>
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-foreground text-lg">
+                              {app.candidateProfile?.full_name || resume?.parsed_name || "Unknown Candidate"}
+                            </h3>
+                            <p className="text-sm text-muted-foreground">{app.candidateProfile?.email}</p>
+                            {app.candidateProfile?.location && (
+                              <p className="text-sm text-muted-foreground">{app.candidateProfile.location}</p>
+                            )}
+                          </div>
+                        </div>
+                        <MatchScoreRing score={app.match_score || 0} size="sm" />
+                      </div>
+
+                      {/* Skill Match Breakdown (collapsible) */}
+                      <div>
+                        <button
+                          onClick={() => toggleSkills(app.id)}
+                          className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+                        >
+                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          {isExpanded ? "Hide" : "View"} Skill Breakdown
+                        </button>
+                        {isExpanded && (
+                          <div className="mt-3 p-3 rounded-xl bg-muted/30 border border-border">
+                            <SkillMatchBreakdown candidateSkills={candidateSkills} jobSkills={jobSkills} />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Resume info + download */}
+                      {resume && (
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-muted-foreground">Resume: {resume?.file_name}</p>
+                          {resume?.file_url && (
+                            <button
+                              onClick={() => downloadResume(resume.file_url, resume.file_name)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-foreground text-xs font-medium transition-colors"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Download Resume
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Status + Actions */}
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-3 border-t border-border">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium capitalize border ${getStatusColor(app.status)}`}>
+                            {getStatusIcon(app.status)}
+                            {app.status}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            Applied {new Date(app.created_at).toLocaleDateString()}
                           </span>
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-foreground text-lg">
-                            {app.candidateProfile?.full_name || (app.resumes as any)?.parsed_name || "Unknown Candidate"}
-                          </h3>
-                          <p className="text-sm text-muted-foreground">{app.candidateProfile?.email}</p>
-                          {app.candidateProfile?.location && (
-                            <p className="text-sm text-muted-foreground">{app.candidateProfile.location}</p>
+
+                        <div className="flex items-center gap-2">
+                          {app.status !== "shortlisted" && app.status !== "hired" && (
+                            <button
+                              onClick={() => updateStatus(app.id, "shortlisted")}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-colors text-sm font-medium"
+                            >
+                              <CheckCircle className="w-4 h-4" /> Accept
+                            </button>
                           )}
-                        </div>
-                      </div>
-                      <MatchScoreRing score={app.match_score || 0} size="sm" />
-                    </div>
-
-                    {/* Skills from resume */}
-                    {app.resumes && (
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-2">Resume: {(app.resumes as any)?.file_name}</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {((app.resumes as any)?.parsed_skills || []).slice(0, 8).map((s: string) => (
-                            <span key={s} className="text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary font-medium">{s}</span>
-                          ))}
-                          {((app.resumes as any)?.parsed_skills || []).length > 8 && (
-                            <span className="text-xs px-2.5 py-1 rounded-full bg-muted text-muted-foreground">
-                              +{(app.resumes as any).parsed_skills.length - 8} more
-                            </span>
+                          {app.status !== "rejected" && (
+                            <button
+                              onClick={() => updateStatus(app.id, "rejected")}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors text-sm font-medium"
+                            >
+                              <XCircle className="w-4 h-4" /> Reject
+                            </button>
                           )}
+                          <button
+                            onClick={() => startChat(app.candidate_id)}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm font-medium"
+                          >
+                            <MessageSquare className="w-4 h-4" /> Message
+                          </button>
                         </div>
-                      </div>
-                    )}
-
-                    {/* Status + Action Buttons */}
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-3 border-t border-border">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium capitalize border ${getStatusColor(app.status)}`}>
-                          {getStatusIcon(app.status)}
-                          {app.status}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          Applied {new Date(app.created_at).toLocaleDateString()}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {app.status !== "shortlisted" && app.status !== "hired" && (
-                          <button
-                            onClick={() => updateStatus(app.id, "shortlisted")}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-success/10 text-success hover:bg-success/20 transition-colors text-sm font-medium"
-                          >
-                            <CheckCircle className="w-4 h-4" />
-                            Accept
-                          </button>
-                        )}
-
-                        {app.status !== "rejected" && (
-                          <button
-                            onClick={() => updateStatus(app.id, "rejected")}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors text-sm font-medium"
-                          >
-                            <XCircle className="w-4 h-4" />
-                            Reject
-                          </button>
-                        )}
-
-                        <button
-                          onClick={() => startChat(app.candidate_id)}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-sm font-medium"
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                          Message
-                        </button>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
