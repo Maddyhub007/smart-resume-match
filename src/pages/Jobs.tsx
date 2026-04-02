@@ -67,6 +67,7 @@ const Jobs = () => {
   const [applyingJob, setApplyingJob] = useState<any>(null);
   const [userResumes, setUserResumes] = useState<any[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null);
+  const [candidateSkills, setCandidateSkills] = useState<string[]>([]);
 
   // Internal jobs
   useEffect(() => {
