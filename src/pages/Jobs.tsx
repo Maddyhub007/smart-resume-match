@@ -103,7 +103,9 @@ const Jobs = () => {
           .from("resumes").select("parsed_skills").eq("user_id", user.id).eq("is_active", true)
           .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
-        const candidateSkills = (resume?.parsed_skills || []).map((s: string) => s.toLowerCase());
+        const skills = resume?.parsed_skills || [];
+        setCandidateSkills(skills);
+        const candidateSkills = skills.map((s: string) => s.toLowerCase());
         const jobsWithScores = data.map((job) => {
           const jobSkills = (job.skills_required || []).map((s: string) => s.toLowerCase());
           const matchCount = jobSkills.filter((s: string) => candidateSkills.includes(s)).length;
