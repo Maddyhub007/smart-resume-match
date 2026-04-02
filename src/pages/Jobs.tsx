@@ -4,6 +4,7 @@ import { Briefcase, Loader2, Globe, Building2, Search, ChevronLeft, ChevronRight
 import Layout from "../components/layout/Layout";
 import JobCard from "../components/ui/JobCard";
 import ExternalJobCard from "../components/ui/ExternalJobCard";
+import SkillMatchBreakdown from "@/components/recruiter/SkillMatchBreakdown";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
